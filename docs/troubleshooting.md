@@ -1186,6 +1186,7 @@ Side note for verifying the upload without the EAS CLI (`submission:view`/`submi
 
 <!-- skipped: cd759a8 docs(log): TestFlight 1.1.0 release + EAS build-credit wall (789fdc5) -->
 <!-- skipped: e50ea78 chore(log): mark cd759a8 routine [no-log] -->
+<!-- skipped: 4efe418 docs(log): AI coding-prompts pack + expo-router types gotcha (c651884) -->
 
 ---
 
