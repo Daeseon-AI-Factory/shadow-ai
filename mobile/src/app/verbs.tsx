@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Redirect } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
@@ -23,40 +23,36 @@ import { useAuthStore } from '@/lib/auth-store';
 import { t } from '@/lib/i18n';
 import { applyMode, composeOnCheck, modeLabel, type DeckMode } from '@/lib/drill-modes';
 
-// Frequency is the spine: T1 (daily core) before T2/T3, starred first within a tier. The particle
-// (up/off/out…) is layered on as a "feel" hint, not as the ordering — the queue stays frequency-first.
-type Filter = 'all' | 1 | 2 | 3;
-const FILTERS: Filter[] = ['all', 1, 2, 3];
+// The verb pack, browsable three ways: by frequency TIER, by base VERB (put/take/get…), or by
+// PARTICLE (up/off/out…). Whichever axis + group you pick, the same cards feed the same Leitner
+// SRS — grade a card and it comes back via Today / Weak spots on the 1/3/7/14 schedule.
+type Axis = 'tier' | 'verb' | 'particle';
+const ALL = '__all__';
 
-function filterLabel(f: Filter): string {
-  return f === 'all'
-    ? t('verbs.filterAll')
-    : f === 1
-      ? t('verbs.filterT1')
-      : f === 2
-        ? t('verbs.filterT2')
-        : t('verbs.filterT3');
-}
-
-/** Flatten the verb pack into drill items, frequency-ordered (T1 first), with a particle feel note. */
-function itemsFor(filter: Filter): DrillItem[] {
-  const rows: { tier: number; star: number; di: DrillItem }[] = [];
+// Flatten once: every card tagged with its verb group, tier, star priority and particle.
+type Row = { key: string; verbId: string; verbLabel: string; tier: number; star: number; particle: string | null; di: DrillItem };
+const ROWS: Row[] = (() => {
+  const out: Row[] = [];
   for (const g of VERB_PACK) {
     const verbLabel = g.verb === 'APPENDIX' ? 'PHRASE' : g.verb;
     g.items.forEach((it, i) => {
-      if (filter !== 'all' && it.tier !== filter) return;
       const key = verbKey(g.id, i);
       const p = PARTICLE_INFO[key];
+      const particle = p && p.particle ? p.particle : null;
       const hasFeel = !!(p && p.particleType === 'adverb' && p.particle);
       const feelNote = hasFeel && p!.sense ? `${p!.particle} = ${p!.sense}` : undefined;
       const note = [feelNote, it.easyEn].filter(Boolean).join('  ·  ') || undefined;
-      rows.push({
+      out.push({
+        key,
+        verbId: g.id,
+        verbLabel,
         tier: it.tier,
         star: it.star ? 0 : 1,
+        particle,
         di: {
           key,
           title: verbLabel,
-          subtitle: `${verbLabel} · T${it.tier}${hasFeel ? ` · ${p!.particle}` : ''}`,
+          subtitle: `${verbLabel} · T${it.tier}${particle ? ` · ${particle}` : ''}`,
           cue: it.cue,
           model: it.model,
           note,
@@ -64,13 +60,39 @@ function itemsFor(filter: Filter): DrillItem[] {
       });
     });
   }
-  rows.sort((a, b) => a.tier - b.tier || a.star - b.star);
-  return rows.map((r) => r.di);
+  return out;
+})();
+
+// Group lists per axis (id + label + count), so the picker shows how many cards each group holds.
+const VERB_GROUPS = VERB_PACK.map((g) => ({ id: g.id, label: g.verb === 'APPENDIX' ? 'PHRASE' : g.verb, n: g.items.length }));
+const TIER_GROUPS = [1, 2, 3]
+  .map((tr) => ({ id: String(tr), label: `T${tr}`, n: ROWS.filter((r) => r.tier === tr).length }))
+  .filter((x) => x.n > 0);
+const PARTICLE_GROUPS_V = (() => {
+  const counts = new Map<string, number>();
+  for (const r of ROWS) if (r.particle) counts.set(r.particle, (counts.get(r.particle) ?? 0) + 1);
+  return [...counts.entries()].map(([id, n]) => ({ id, label: id, n })).sort((a, b) => b.n - a.n);
+})();
+
+function groupsFor(axis: Axis) {
+  return axis === 'verb' ? VERB_GROUPS : axis === 'particle' ? PARTICLE_GROUPS_V : TIER_GROUPS;
+}
+
+/** Cards for the chosen axis+group, frequency-ordered (T1 first, starred first within a tier). */
+function itemsFor(axis: Axis, pick: string): DrillItem[] {
+  let rows = ROWS;
+  if (pick !== ALL) {
+    rows = ROWS.filter((r) =>
+      axis === 'verb' ? r.verbId === pick : axis === 'particle' ? r.particle === pick : String(r.tier) === pick,
+    );
+  }
+  return [...rows].sort((a, b) => a.tier - b.tier || a.star - b.star).map((r) => r.di);
 }
 
 export default function VerbDrillScreen() {
   const token = useAuthStore((s) => s.token);
-  const [filter, setFilter] = useState<Filter>('all');
+  const [axis, setAxis] = useState<Axis>('tier');
+  const [pick, setPick] = useState<string>(ALL);
   const [mode, setMode] = useState<DeckMode>('recall');
   const [started, setStarted] = useState(false);
 
@@ -80,13 +102,15 @@ export default function VerbDrillScreen() {
     enabled: !!token,
   });
 
-  // The day's session: all due reviews (shuffled) + a frequency-ordered trickle of new cards.
-  // partition() keeps `fresh` in the order of `itemsFor` (tier-sorted), so new cards arrive T1-first.
+  const groups = useMemo(() => groupsFor(axis), [axis]);
+
+  // The day's session for the picked group: all due reviews (shuffled) + a frequency-ordered trickle
+  // of new cards. partition() keeps `fresh` in itemsFor order (tier-sorted), so new cards arrive T1-first.
   const session = useMemo<DrillItem[]>(() => {
     if (!srs.data) return [];
-    const { due, fresh } = partition(applyMode(itemsFor(filter), mode), srs.data as SrsCard[], localToday());
+    const { due, fresh } = partition(applyMode(itemsFor(axis, pick), mode), srs.data as SrsCard[], localToday());
     return [...shuffle(due), ...fresh.slice(0, NEW_PER_DAY)];
-  }, [filter, mode, srs.data]);
+  }, [axis, pick, mode, srs.data]);
 
   if (!token) return <Redirect href="/login" />;
   if (srs.isPending) {
@@ -107,36 +131,68 @@ export default function VerbDrillScreen() {
   if (started) {
     return (
       <DrillRunner
-        key={`${filter}:${mode}:${session.map((e) => e.key).join(',')}`}
+        key={`${axis}:${pick}:${mode}:${session.map((e) => e.key).join(',')}`}
         items={session}
         onCheck={mode === 'compose' ? composeOnCheck : undefined}
       />
     );
   }
 
+  const pickAxis = (a: Axis) => {
+    setAxis(a);
+    setPick(ALL);
+  };
+
   return (
     <ThemedView style={styles.flex}>
-      <SafeAreaView style={styles.flex}>
+      <SafeAreaView style={styles.flex} edges={['bottom']}>
         <View style={styles.container}>
           <ThemedText type="title">{t('verbs.title')}</ThemedText>
           <ThemedText type="small">{t('verbs.subtitle')}</ThemedText>
 
-          <View style={styles.chips}>
-            {FILTERS.map((f) => (
+          {/* Axis: browse by tier / by verb / by particle */}
+          <View style={styles.axisRow}>
+            {(['tier', 'verb', 'particle'] as Axis[]).map((a) => (
               <Pressable
-                key={String(f)}
-                style={[styles.chip, filter === f && styles.chipActive]}
-                onPress={() => setFilter(f)}
+                key={a}
+                style={[styles.axisBtn, axis === a && styles.axisActive]}
+                onPress={() => pickAxis(a)}
                 accessibilityRole="button"
-                accessibilityState={{ selected: filter === f }}
+                accessibilityState={{ selected: axis === a }}
               >
-                <ThemedText style={filter === f ? styles.chipTextActive : styles.chipText}>
-                  {filterLabel(f)}
+                <ThemedText style={axis === a ? styles.axisTextActive : styles.axisText}>
+                  {t(`verbs.axis_${a}` as 'verbs.axis_tier')}
                 </ThemedText>
               </Pressable>
             ))}
           </View>
 
+          {/* Groups for the chosen axis (scrolls for the 100+ verb chips) */}
+          <ScrollView style={styles.groupScroll} contentContainerStyle={styles.chips} keyboardShouldPersistTaps="handled">
+            <Pressable
+              style={[styles.chip, pick === ALL && styles.chipActive]}
+              onPress={() => setPick(ALL)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: pick === ALL }}
+            >
+              <ThemedText style={pick === ALL ? styles.chipTextActive : styles.chipText}>{t('verbs.allGroups')}</ThemedText>
+            </Pressable>
+            {groups.map((g) => (
+              <Pressable
+                key={g.id}
+                style={[styles.chip, pick === g.id && styles.chipActive]}
+                onPress={() => setPick(g.id)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: pick === g.id }}
+              >
+                <ThemedText style={pick === g.id ? styles.chipTextActive : styles.chipText}>
+                  {g.label} · {g.n}
+                </ThemedText>
+              </Pressable>
+            ))}
+          </ScrollView>
+
+          {/* Drill mode */}
           <View style={styles.chips}>
             {(['recall', 'reverse', 'compose'] as DeckMode[]).map((m) => (
               <Pressable
@@ -173,8 +229,23 @@ export default function VerbDrillScreen() {
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8, padding: 24 },
-  container: { flex: 1, padding: 24, gap: 14 },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
+  container: { flex: 1, padding: 24, gap: 12 },
+  axisRow: { flexDirection: 'row', gap: 8, marginTop: 8 },
+  axisBtn: {
+    flex: 1,
+    minHeight: 40,
+    paddingVertical: 9,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#9ca3af',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  axisActive: { backgroundColor: '#208AEF', borderColor: '#208AEF' },
+  axisText: { fontWeight: '600' },
+  axisTextActive: { color: '#fff', fontWeight: '700' },
+  groupScroll: { maxHeight: 168 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: {
     minHeight: 40,
     paddingHorizontal: 16,
