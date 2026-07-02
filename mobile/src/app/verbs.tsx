@@ -41,7 +41,10 @@ const ROWS: Row[] = (() => {
       const particle = p && p.particle ? p.particle : null;
       const hasFeel = !!(p && p.particleType === 'adverb' && p.particle);
       const feelNote = hasFeel && p!.sense ? `${p!.particle} = ${p!.sense}` : undefined;
-      const note = [feelNote, it.easyEn].filter(Boolean).join('  ·  ') || undefined;
+      // Reveal shows: the example sentence (+ its Korean) first, then the particle feel / easy-EN meta.
+      const exLine = it.example ? `“${it.example}”${it.exampleKo ? `\n${it.exampleKo}` : ''}` : undefined;
+      const meta = [feelNote, it.easyEn].filter(Boolean).join('  ·  ') || undefined;
+      const note = [exLine, meta].filter(Boolean).join('\n') || undefined;
       out.push({
         key,
         verbId: g.id,

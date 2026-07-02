@@ -29,7 +29,16 @@ function allItems(): DrillItem[] {
   const out: DrillItem[] = [];
   for (const g of VERB_PACK)
     g.items.forEach((it, i) =>
-      out.push({ key: verbKey(g.id, i), title: g.verb, cue: it.cue, model: it.model, note: it.easyEn, target: it.model }),
+      out.push({
+        key: verbKey(g.id, i),
+        title: g.verb,
+        cue: it.cue,
+        model: it.model,
+        note: [it.example ? `“${it.example}”${it.exampleKo ? `\n${it.exampleKo}` : ''}` : undefined, it.easyEn]
+          .filter(Boolean)
+          .join('\n') || undefined,
+        target: it.model,
+      }),
     );
   PHRASAL_500.forEach((p, i) =>
     out.push({
