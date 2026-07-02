@@ -1206,6 +1206,7 @@ src/app/(tabs)/practice.tsx(99,7): error TS2322: Type '"/ai-coding"' is not assi
 
 **Pattern.** Adding a bundled study pack touches a fixed set: source `docs/<pack>.md` → a `scripts/build-*.py` emit → `packages/core/src/<pack>.ts` → `index.ts` export → `practice-cards.ts` (key + `cardIndex` + `CardInfo` kind) → mobile (page, `_layout` Stack.Screen, `practice.tsx` hub entry, `today.tsx` pool, `i18n-messages.ts`) → web (page, `practice/page.tsx` list, `today/page.tsx` pool, `messages/*.json` decks ×5). Mirror the most recent pack (it-terms) and the only non-mechanical step is regenerating expo-router types.
 <!-- skipped: 3dc3384 chore(log): mark 4efe418 routine [no-log] -->
+<!-- skipped: 5ee454d docs(log): verb pack discoverability fix — buried tab, label, flat firehose (3d9dd6d) -->
 
 ---
 
