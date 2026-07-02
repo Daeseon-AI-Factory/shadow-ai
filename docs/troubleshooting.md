@@ -1205,3 +1205,21 @@ src/app/(tabs)/practice.tsx(99,7): error TS2322: Type '"/ai-coding"' is not assi
 **Commit.** `c651884`
 
 **Pattern.** Adding a bundled study pack touches a fixed set: source `docs/<pack>.md` → a `scripts/build-*.py` emit → `packages/core/src/<pack>.ts` → `index.ts` export → `practice-cards.ts` (key + `cardIndex` + `CardInfo` kind) → mobile (page, `_layout` Stack.Screen, `practice.tsx` hub entry, `today.tsx` pool, `i18n-messages.ts`) → web (page, `practice/page.tsx` list, `today/page.tsx` pool, `messages/*.json` decks ×5). Mirror the most recent pack (it-terms) and the only non-mechanical step is regenerating expo-router types.
+<!-- skipped: 3dc3384 chore(log): mark 4efe418 routine [no-log] -->
+
+---
+
+## The study content was there but unfindable — buried tab, wrong label, flat firehose
+
+**Symptom.** The founder installed 1.1.0 and repeatedly couldn't find the verb pack ("verbs 어딨냐"). Verified in the simulator: the app opens to a login screen when logged out, and even logged in the pack is three problems deep.
+
+**Cause (verified, in code).** Three separate discoverability failures, all confirmed by reading the source:
+1. **Wrong search term.** The pack's label is `home.verbs` = "Base verbs" (en) / "기본 동사" (ko) — searching for "Verbs"/"동사" misses it.
+2. **Buried entry.** `mobile/src/app/(tabs)/_layout.tsx` had `<Tabs.Screen name="practice" options={{ href: null }}/>` — Practice (the packs hub) was hidden from the tab bar, reachable only via a small "More practice" MiniCard at the bottom of the Today home screen (`index.tsx` → `router.push('/practice')`).
+3. **Flat firehose.** `verbs.tsx` flattened all 1956 cards into one queue with only a tier filter — even though `VERB_PACK` is 103 verb groups and `PARTICLE_INFO[key].particle` gives each card's particle. No way to drill just "put" verbs or just "up" phrasals.
+
+The SRS itself was fine: `drill-runner.tsx` already calls `practiceApi.grade(key, ok, localToday())`, so grading feeds the Leitner schedule and resurfaces via Today / Weak spots (1/3/7/14). The Anki loop existed; it just felt absent because browsing and reviewing were on different screens.
+
+**Fix.** `3d9dd6d`: made `practice` a primary bottom tab (dropped `href: null`, added a graduationcap icon), and gave `verbs.tsx` an axis switcher — **By tier / By verb (103) / By particle** (from `PARTICLE_INFO`) — feeding the same `partition()` + `DrillRunner` SRS flow. Verified in the simulator (By tier → T1·453 / T2·1184 / T3·319).
+
+**Pattern.** "Feature doesn't exist" from a user often means data-exists-but-UI-doesn't. Grep the datasets before believing a capability is missing — here the verb groups, particle tags, and SRS grading were all already present; only the browsing UI and the tab were missing.
