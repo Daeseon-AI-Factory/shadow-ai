@@ -1225,6 +1225,7 @@ The SRS itself was fine: `drill-runner.tsx` already calls `practiceApi.grade(key
 
 **Pattern.** "Feature doesn't exist" from a user often means data-exists-but-UI-doesn't. Grep the datasets before believing a capability is missing — here the verb groups, particle tags, and SRS grading were all already present; only the browsing UI and the tab were missing.
 <!-- skipped: 24dc376 chore(log): mark 5ee454d routine [no-log] -->
+<!-- skipped: f9fd569 docs(log): 1956 verb example sentences generated + merged at build (067fb49) -->
 
 ---
 
