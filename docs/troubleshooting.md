@@ -1224,3 +1224,16 @@ The SRS itself was fine: `drill-runner.tsx` already calls `practiceApi.grade(key
 **Fix.** `3d9dd6d`: made `practice` a primary bottom tab (dropped `href: null`, added a graduationcap icon), and gave `verbs.tsx` an axis switcher — **By tier / By verb (103) / By particle** (from `PARTICLE_INFO`) — feeding the same `partition()` + `DrillRunner` SRS flow. Verified in the simulator (By tier → T1·453 / T2·1184 / T3·319).
 
 **Pattern.** "Feature doesn't exist" from a user often means data-exists-but-UI-doesn't. Grep the datasets before believing a capability is missing — here the verb groups, particle tags, and SRS grading were all already present; only the browsing UI and the tab were missing.
+<!-- skipped: 24dc376 chore(log): mark 5ee454d routine [no-log] -->
+
+---
+
+## The base-verb pack had zero example sentences — generated 1,956 and merged them at build
+
+**Symptom.** Founder, on opening a Base-verbs card: "예문이 1도없네" — the cards showed a Korean cue and an English pattern (`be into [topic]`) but never a sentence putting it to use.
+
+**Cause (verified).** Confirmed in the source, not guessed: `VerbItem` had no `example` field (`{cue, model, tier, star?, easyEn?}`), `grep -c '"example"' packages/core/src/phrasal-verbs.ts` returned `0`, and `docs/default_verb_v3.md` — the hand-authored source of truth — carries no example sentences either. The examples were never written.
+
+**Fix.** `067fb49`: generated one natural example sentence + Korean translation for every entry via a 103-agent workflow (one agent per verb group, parallel — real everyday/work English, brackets filled with concrete content). Stored the 1,957 pairs keyed `"<groupId>#<index>"` in `scripts/data/verb-examples.json` (committed AI data), and had `build-verb-pack.py` merge them onto each item after parsing v3.md — so re-parsing the markdown source keeps the examples instead of wiping them. Added `example?`/`exampleKo?` to `VerbItem`; the drill reveal shows the sentence under the model on both the Base-verbs screen and Today. Verified: `examples merged: 1956/1956`, mobile `tsc` 0 errors.
+
+**Pattern.** For AI-augmented fields on a doc-generated dataset, keep the generation OUT of the source doc: commit the AI output as keyed side-data and merge it in the build step. The human-editable source stays clean and re-generatable; the expensive AI pass isn't lost on the next parse. (Same shape as `scripts/data/particle-classifications.json`.)
