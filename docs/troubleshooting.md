@@ -1238,3 +1238,23 @@ The SRS itself was fine: `drill-runner.tsx` already calls `practiceApi.grade(key
 **Fix.** `067fb49`: generated one natural example sentence + Korean translation for every entry via a 103-agent workflow (one agent per verb group, parallel — real everyday/work English, brackets filled with concrete content). Stored the 1,957 pairs keyed `"<groupId>#<index>"` in `scripts/data/verb-examples.json` (committed AI data), and had `build-verb-pack.py` merge them onto each item after parsing v3.md — so re-parsing the markdown source keeps the examples instead of wiping them. Added `example?`/`exampleKo?` to `VerbItem`; the drill reveal shows the sentence under the model on both the Base-verbs screen and Today. Verified: `examples merged: 1956/1956`, mobile `tsc` 0 errors.
 
 **Pattern.** For AI-augmented fields on a doc-generated dataset, keep the generation OUT of the source doc: commit the AI output as keyed side-data and merge it in the build step. The human-editable source stays clean and re-generatable; the expensive AI pass isn't lost on the next parse. (Same shape as `scripts/data/particle-classifications.json`.)
+<!-- skipped: 5e418fe chore(log): mark f9fd569 routine [no-log] -->
+
+---
+
+## 2026-07-07 — Realtime voice sparring v1: WebView bridge instead of a native WebRTC module
+
+**Decision (no incident).** Shipped the first in-app realtime voice feature (SRS-driven English sparring, OpenAI Realtime `gpt-realtime`) without adding any native dependency.
+
+**Key choices, verified in code/tests:**
+- **Transport = hidden `react-native-webview` page**, not `react-native-webrtc`. The webview native module is already compiled into the app (YouTube transcripts use it), so v1 needs no new native build risk. The page (`backend/src/main/resources/static/sparring.html`, served over HTTPS, `permitAll`) is a headless bridge: RN injects the ephemeral secret via `injectJavaScript`, the page runs WebRTC mic↔OpenAI, and posts transcripts back via `postMessage`. All UI is native RN.
+- **Key custody**: `POST /api/practice/sparring/session` (auth required) mints the OpenAI ephemeral client secret server-side (`SparringClient`); `OPENAI_API_KEY` was already in the server env for transcription, so no new secret plumbing. Audio flows phone↔OpenAI directly — the backend never touches it.
+- **Prompt-cache-friendly instructions**: fixed persona prefix + variable SRS targets appended LAST (`SparringPrompt.build`, asserted in `SparringPromptTest`).
+- **Per-mode turn detection**: chat = `server_vad` 250 ms (fast tiki-taka), interview = 800 ms (ESL candidate can organize long answers). Same model, mode-specific 사용감.
+- **The loop**: due cards from `/api/practice/srs` are picked client-side (`sparring.tsx`), planted in the instructions, detected in live transcripts with conjugation-tolerant matchers (`packages/core/src/sparring-detect.ts` — irregular verb map + up to 2 filler words for separable phrasal verbs), and graded via the existing `practiceApi.grade` on the spot.
+
+**Verified.** `SparringPromptTest` green; full `practice.*` suite green (controller constructor change covered); mobile `tsc` 0 errors; local bootRun served `/sparring.html` 200 unauthenticated and a real mint round-trip returned `clientSecret` (35 chars, model `gpt-realtime`).
+
+**Commit.** `048c02e`
+
+**Pattern.** When a webview module is already compiled into the app, a hidden HTTPS bridge page is the cheapest way to borrow a browser capability (WebRTC, WebAudio) without a new native dependency — keep the page headless and drive all UI natively over `postMessage`.
