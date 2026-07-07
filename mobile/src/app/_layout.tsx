@@ -77,6 +77,7 @@ export default function RootLayout() {
             <Stack.Screen name="mix" options={{ headerShown: true, title: t('nav.mix') }} />
             <Stack.Screen name="story" options={{ headerShown: true, title: t('nav.story') }} />
             <Stack.Screen name="today" options={{ headerShown: true, title: t('nav.today') }} />
+            <Stack.Screen name="sparring" options={{ headerShown: true, title: t('nav.sparring') }} />
             <Stack.Screen name="compose" options={{ headerShown: true, title: t('nav.compose') }} />
             <Stack.Screen name="weak" options={{ headerShown: true, title: t('nav.weak') }} />
             <Stack.Screen name="prepositions" options={{ headerShown: true, title: t('nav.prepositions') }} />

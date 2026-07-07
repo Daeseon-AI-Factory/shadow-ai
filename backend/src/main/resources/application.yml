@@ -79,6 +79,14 @@ tubeshadow:
     # gemini-2.5-flash free tier: generous quota for personal study.
     # Stable alias: gemini-flash-latest. Override with GEMINI_MODEL env var.
     model: ${GEMINI_MODEL:gemini-2.5-flash}
+  sparring:
+    # Realtime voice sparring — native speech-to-speech (WebRTC straight from the app to OpenAI;
+    # this server only mints the ephemeral session secret). gpt-realtime-mini via SPARRING_MODEL
+    # trades some prosody quality for ~1/3 the per-minute cost.
+    api-key: ${OPENAI_API_KEY:}
+    base-url: ${SPARRING_BASE_URL:https://api.openai.com}
+    model: ${SPARRING_MODEL:gpt-realtime}
+    voice: ${SPARRING_VOICE:marin}
   transcription:
     # Speech-to-text — OpenAI gpt-4o-transcribe by default (low hallucination, dev-jargon accurate).
     # OpenAI-compatible, so pointing base-url/path/model at Groq whisper-large-v3 swaps providers.
