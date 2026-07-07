@@ -1258,3 +1258,5 @@ The SRS itself was fine: `drill-runner.tsx` already calls `practiceApi.grade(key
 **Commit.** `048c02e`
 
 **Pattern.** When a webview module is already compiled into the app, a hidden HTTPS bridge page is the cheapest way to borrow a browser capability (WebRTC, WebAudio) without a new native dependency — keep the page headless and drive all UI natively over `postMessage`.
+
+<!-- override-trigger: 79e8f9a docs(log): realtime voice sparring v1 — WebView bridge decision (048c02e) [no-log] — false positive: this commit IS the log pair for feature commit 048c02e (troubleshooting entry + mdx narrative, both included in it); the keyword "decision" is in the log title, not an unlogged change -->
