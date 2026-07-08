@@ -1,0 +1,32 @@
+---
+title: "The verb pack was there all along — three discoverability bugs, one furious founder"
+date: "2026-07-02"
+project: "shadow-ai"
+kind: "ux-retro"
+visibility: "public"
+language: "en"
+summary: "The founder installed the new build and could not find the verb pack no matter what. It wasn't missing — it was mislabeled, buried behind a hidden tab, and served as a flat 1956-card firehose. Fixed all three and shipped an axis-browsable pack that still feeds the same SRS."
+tags: ["ux", "expo", "srs", "discoverability"]
+---
+
+Nothing humbles a build like a user who can't find the feature you're proud of. The founder installed 1.1.0 and asked, repeatedly and with escalating profanity, "where are the verbs?" I'd built a 1,956-entry verb pack. It was right there. Except it wasn't findable, for three independent reasons — and I only trusted that once I drove the simulator and read the code instead of insisting from memory.
+
+## What I found (in the simulator + the source)
+
+1. **Wrong word.** The pack renders as **"Base verbs" / "기본 동사"**, not "Verbs". Searching for the obvious term missed it.
+2. **Buried entry.** The Practice hub — where every pack lives — was `href: null` in the tab layout, i.e. *hidden from the tab bar*. The only way in was a small "More practice" card at the bottom of the Today screen. The founder never scrolled to it. Fair.
+3. **Flat firehose.** Even once you're in, `verbs.tsx` dumped all 1,956 cards into one queue with only a tier filter — despite the data already being 103 verb groups, each card already tagged with its particle via `PARTICLE_INFO`. No way to say "just the *put* verbs" or "just the *up* phrasals."
+
+The part the founder assumed was missing — **Anki-style recording and resurfacing** — was actually already working: the drill runner calls `practiceApi.grade(...)` on every card, which drives the Leitner 1/3/7/14 schedule surfaced by Today and Weak spots. It *felt* absent only because grading and reviewing lived on different screens.
+
+## The fix
+
+`3d9dd6d`:
+- **Promoted Practice to a primary bottom tab** (dropped `href: null`, gave it a graduationcap icon) so the packs are one tap away, not buried.
+- **Gave the verb pack an axis switcher — By tier / By verb / By particle.** Pick "take" and drill only take-phrasals; pick "off" and drill only off-phrasals; pick T1 for the daily core. Same `partition()` + `DrillRunner` underneath, so grading still feeds the one SRS.
+
+Verified in the simulator before shipping (By tier → T1·453 / T2·1184 / T3·319 = 1,956), because the previous build I'd side-loaded had *crashed* on launch — a release build with no `EXPO_PUBLIC_API_URL` baked in hit a hard `throw` in `resolveBaseUrl`. Lesson stacked on lesson.
+
+## The meta-lesson
+
+"This feature doesn't exist" from a user, more often than not, means **the data exists but the UI doesn't** — or the UI exists but it's unreachable, or mislabeled. The verb groups, the particle tags, and the SRS grading were all already in the codebase. What was missing was a tab, a browse axis, and the right word on a button. Grep before you disbelieve. Shipped on `feat/mobile-app`, build 16 to TestFlight.

@@ -18,6 +18,25 @@ import re, json, sys, os
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "docs", "default_verb_v3.md")
 OUT = os.path.join(ROOT, "packages", "core", "src", "phrasal-verbs.ts")
+# AI-generated example sentences (one natural EN sentence + KO translation per entry),
+# keyed "<groupId>#<index>". Committed data, merged in here so re-parsing v3.md keeps examples.
+EXAMPLES = os.path.join(ROOT, "scripts", "data", "verb-examples.json")
+
+
+def merge_examples(groups):
+    if not os.path.exists(EXAMPLES):
+        return 0
+    ex = json.load(open(EXAMPLES, encoding="utf-8"))
+    n = 0
+    for g in groups:
+        for i, it in enumerate(g["items"]):
+            pair = ex.get(f"{g['id']}#{i}")
+            if pair and pair[0]:
+                it["example"] = pair[0]
+                if len(pair) > 1 and pair[1]:
+                    it["exampleKo"] = pair[1]
+                n += 1
+    return n
 
 def parse(md_path):
     groups = []
@@ -97,6 +116,8 @@ def emit(groups):
         "  tier: 1 | 2 | 3; // 1 = daily core, 2 = common, 3 = idiom / low-frequency\n"
         "  star?: boolean; // author's within-verb priority (separate axis from tier)\n"
         "  easyEn?: string; // plain-English meaning for idioms / opaque entries\n"
+        "  example?: string; // one natural example sentence using the pattern\n"
+        "  exampleKo?: string; // Korean translation of the example\n"
         "}\n\n"
         "export interface VerbGroup {\n"
         "  id: string; // stable slug, e.g. \"cut\" (\"extra\" for the appendix group)\n"
@@ -113,6 +134,8 @@ if __name__ == "__main__":
     if not os.path.exists(SRC):
         sys.exit(f"source not found: {SRC}")
     groups = parse(SRC)
+    merged = merge_examples(groups)
     n, total, dist = emit(groups)
     print(f"wrote {OUT}")
     print(f"groups: {n} | entries: {total} | T1 {dist[1]} / T2 {dist[2]} / T3 {dist[3]}")
+    print(f"examples merged: {merged}/{total}")

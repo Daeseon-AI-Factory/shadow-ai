@@ -68,6 +68,17 @@ export interface TranscribeResult {
   text: string;
 }
 
+// Ephemeral OpenAI Realtime credential for a voice sparring session (single session, short TTL —
+// the server-side API key never reaches the client). `model` names the realtime model to call.
+export interface SparringSession {
+  clientSecret: string;
+  model: string;
+}
+export interface SparringTarget {
+  label: string; // the English chunk to elicit
+  ko?: string; // Korean gloss
+}
+
 // One turn of the AI mock interview; empty history asks for the opening question.
 export interface MockTurn {
   role: "interviewer" | "candidate";
@@ -100,6 +111,9 @@ export const practiceApi = {
   // Next interviewer question in the AI mock interview (opener on empty history, else a follow-up).
   mockNext: (history: MockTurn[], seed?: number) =>
     apiClient.post<MockNext>("/api/practice/interview/mock", { history, seed }),
+  // Mint a realtime voice sparring session — targets are the learner's due cards to elicit.
+  sparringSession: (mode: 'chat' | 'interview', targets: SparringTarget[]) =>
+    apiClient.post<SparringSession>("/api/practice/sparring/session", { mode, targets }),
   // Upload an audio clip → Whisper transcript. `file` is a React Native file descriptor.
   transcribe: (file: { uri: string; name: string; type: string }) => {
     const form = new FormData();

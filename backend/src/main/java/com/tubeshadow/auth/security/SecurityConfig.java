@@ -52,6 +52,9 @@ public class SecurityConfig {
                                 // Server-to-server entitlement webhook: no JWT (caller is the billing
                                 // platform). Gated by a constant-time X-Billing-Secret check in the controller.
                                 "/api/billing/webhook",
+                                // Static WebRTC bridge page for in-app sparring (inert without the
+                                // ephemeral secret the app injects; contains no data or secrets).
+                                "/sparring.html",
                                 "/swagger-ui.html",
                                 "/swagger-ui/**",
                                 "/v3/api-docs/**",

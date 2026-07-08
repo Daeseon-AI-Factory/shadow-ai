@@ -63,8 +63,15 @@ export default function TabsLayout() {
           tabBarIcon: tabIcon({ ios: 'arrow.triangle.2.circlepath', android: 'sync', web: 'sync' }),
         }}
       />
-      {/* Practice is a hub reached from Today, not a primary tab — hidden from the bar, still routable. */}
-      <Tabs.Screen name="practice" options={{ href: null, title: t('nav.practiceTab') }} />
+      {/* Practice = the packs hub (Base verbs, Mix, Story, AI coding prompts…). A primary tab so the
+          study content is one tap away, not buried behind Today's "More practice" card. */}
+      <Tabs.Screen
+        name="practice"
+        options={{
+          title: t('nav.practiceTab'),
+          tabBarIcon: tabIcon({ ios: 'graduationcap.fill', android: 'school', web: 'school' }),
+        }}
+      />
       <Tabs.Screen
         name="settings"
         options={{

@@ -1186,6 +1186,7 @@ Side note for verifying the upload without the EAS CLI (`submission:view`/`submi
 
 <!-- skipped: cd759a8 docs(log): TestFlight 1.1.0 release + EAS build-credit wall (789fdc5) -->
 <!-- skipped: e50ea78 chore(log): mark cd759a8 routine [no-log] -->
+<!-- skipped: 4efe418 docs(log): AI coding-prompts pack + expo-router types gotcha (c651884) -->
 
 ---
 
@@ -1204,3 +1205,59 @@ src/app/(tabs)/practice.tsx(99,7): error TS2322: Type '"/ai-coding"' is not assi
 **Commit.** `c651884`
 
 **Pattern.** Adding a bundled study pack touches a fixed set: source `docs/<pack>.md` → a `scripts/build-*.py` emit → `packages/core/src/<pack>.ts` → `index.ts` export → `practice-cards.ts` (key + `cardIndex` + `CardInfo` kind) → mobile (page, `_layout` Stack.Screen, `practice.tsx` hub entry, `today.tsx` pool, `i18n-messages.ts`) → web (page, `practice/page.tsx` list, `today/page.tsx` pool, `messages/*.json` decks ×5). Mirror the most recent pack (it-terms) and the only non-mechanical step is regenerating expo-router types.
+<!-- skipped: 3dc3384 chore(log): mark 4efe418 routine [no-log] -->
+<!-- skipped: 5ee454d docs(log): verb pack discoverability fix — buried tab, label, flat firehose (3d9dd6d) -->
+
+---
+
+## The study content was there but unfindable — buried tab, wrong label, flat firehose
+
+**Symptom.** The founder installed 1.1.0 and repeatedly couldn't find the verb pack ("verbs 어딨냐"). Verified in the simulator: the app opens to a login screen when logged out, and even logged in the pack is three problems deep.
+
+**Cause (verified, in code).** Three separate discoverability failures, all confirmed by reading the source:
+1. **Wrong search term.** The pack's label is `home.verbs` = "Base verbs" (en) / "기본 동사" (ko) — searching for "Verbs"/"동사" misses it.
+2. **Buried entry.** `mobile/src/app/(tabs)/_layout.tsx` had `<Tabs.Screen name="practice" options={{ href: null }}/>` — Practice (the packs hub) was hidden from the tab bar, reachable only via a small "More practice" MiniCard at the bottom of the Today home screen (`index.tsx` → `router.push('/practice')`).
+3. **Flat firehose.** `verbs.tsx` flattened all 1956 cards into one queue with only a tier filter — even though `VERB_PACK` is 103 verb groups and `PARTICLE_INFO[key].particle` gives each card's particle. No way to drill just "put" verbs or just "up" phrasals.
+
+The SRS itself was fine: `drill-runner.tsx` already calls `practiceApi.grade(key, ok, localToday())`, so grading feeds the Leitner schedule and resurfaces via Today / Weak spots (1/3/7/14). The Anki loop existed; it just felt absent because browsing and reviewing were on different screens.
+
+**Fix.** `3d9dd6d`: made `practice` a primary bottom tab (dropped `href: null`, added a graduationcap icon), and gave `verbs.tsx` an axis switcher — **By tier / By verb (103) / By particle** (from `PARTICLE_INFO`) — feeding the same `partition()` + `DrillRunner` SRS flow. Verified in the simulator (By tier → T1·453 / T2·1184 / T3·319).
+
+**Pattern.** "Feature doesn't exist" from a user often means data-exists-but-UI-doesn't. Grep the datasets before believing a capability is missing — here the verb groups, particle tags, and SRS grading were all already present; only the browsing UI and the tab were missing.
+<!-- skipped: 24dc376 chore(log): mark 5ee454d routine [no-log] -->
+<!-- skipped: f9fd569 docs(log): 1956 verb example sentences generated + merged at build (067fb49) -->
+
+---
+
+## The base-verb pack had zero example sentences — generated 1,956 and merged them at build
+
+**Symptom.** Founder, on opening a Base-verbs card: "예문이 1도없네" — the cards showed a Korean cue and an English pattern (`be into [topic]`) but never a sentence putting it to use.
+
+**Cause (verified).** Confirmed in the source, not guessed: `VerbItem` had no `example` field (`{cue, model, tier, star?, easyEn?}`), `grep -c '"example"' packages/core/src/phrasal-verbs.ts` returned `0`, and `docs/default_verb_v3.md` — the hand-authored source of truth — carries no example sentences either. The examples were never written.
+
+**Fix.** `067fb49`: generated one natural example sentence + Korean translation for every entry via a 103-agent workflow (one agent per verb group, parallel — real everyday/work English, brackets filled with concrete content). Stored the 1,957 pairs keyed `"<groupId>#<index>"` in `scripts/data/verb-examples.json` (committed AI data), and had `build-verb-pack.py` merge them onto each item after parsing v3.md — so re-parsing the markdown source keeps the examples instead of wiping them. Added `example?`/`exampleKo?` to `VerbItem`; the drill reveal shows the sentence under the model on both the Base-verbs screen and Today. Verified: `examples merged: 1956/1956`, mobile `tsc` 0 errors.
+
+**Pattern.** For AI-augmented fields on a doc-generated dataset, keep the generation OUT of the source doc: commit the AI output as keyed side-data and merge it in the build step. The human-editable source stays clean and re-generatable; the expensive AI pass isn't lost on the next parse. (Same shape as `scripts/data/particle-classifications.json`.)
+<!-- skipped: 5e418fe chore(log): mark f9fd569 routine [no-log] -->
+
+---
+
+## 2026-07-07 — Realtime voice sparring v1: WebView bridge instead of a native WebRTC module
+
+**Decision (no incident).** Shipped the first in-app realtime voice feature (SRS-driven English sparring, OpenAI Realtime `gpt-realtime`) without adding any native dependency.
+
+**Key choices, verified in code/tests:**
+- **Transport = hidden `react-native-webview` page**, not `react-native-webrtc`. The webview native module is already compiled into the app (YouTube transcripts use it), so v1 needs no new native build risk. The page (`backend/src/main/resources/static/sparring.html`, served over HTTPS, `permitAll`) is a headless bridge: RN injects the ephemeral secret via `injectJavaScript`, the page runs WebRTC mic↔OpenAI, and posts transcripts back via `postMessage`. All UI is native RN.
+- **Key custody**: `POST /api/practice/sparring/session` (auth required) mints the OpenAI ephemeral client secret server-side (`SparringClient`); `OPENAI_API_KEY` was already in the server env for transcription, so no new secret plumbing. Audio flows phone↔OpenAI directly — the backend never touches it.
+- **Prompt-cache-friendly instructions**: fixed persona prefix + variable SRS targets appended LAST (`SparringPrompt.build`, asserted in `SparringPromptTest`).
+- **Per-mode turn detection**: chat = `server_vad` 250 ms (fast tiki-taka), interview = 800 ms (ESL candidate can organize long answers). Same model, mode-specific 사용감.
+- **The loop**: due cards from `/api/practice/srs` are picked client-side (`sparring.tsx`), planted in the instructions, detected in live transcripts with conjugation-tolerant matchers (`packages/core/src/sparring-detect.ts` — irregular verb map + up to 2 filler words for separable phrasal verbs), and graded via the existing `practiceApi.grade` on the spot.
+
+**Verified.** `SparringPromptTest` green; full `practice.*` suite green (controller constructor change covered); mobile `tsc` 0 errors; local bootRun served `/sparring.html` 200 unauthenticated and a real mint round-trip returned `clientSecret` (35 chars, model `gpt-realtime`).
+
+**Commit.** `048c02e`
+
+**Pattern.** When a webview module is already compiled into the app, a hidden HTTPS bridge page is the cheapest way to borrow a browser capability (WebRTC, WebAudio) without a new native dependency — keep the page headless and drive all UI natively over `postMessage`.
+
+<!-- override-trigger: 79e8f9a docs(log): realtime voice sparring v1 — WebView bridge decision (048c02e) [no-log] — false positive: this commit IS the log pair for feature commit 048c02e (troubleshooting entry + mdx narrative, both included in it); the keyword "decision" is in the log title, not an unlogged change -->
+<!-- skipped: dc1c646 chore(log): mark 79e8f9a as log-pair commit, trigger false positive [no-log] -->

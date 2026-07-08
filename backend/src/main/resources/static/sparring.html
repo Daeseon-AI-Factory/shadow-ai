@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Mimi Sparring Bridge</title>
+<!--
+  Headless WebRTC bridge for the in-app voice sparring screen.
+  The React Native app renders ALL UI natively and keeps this page hidden; it exists only
+  because react-native-webview is already compiled into the app while a native WebRTC module
+  is not. Protocol:
+    RN -> page : window.startSparring({ clientSecret, model })  /  window.stopSparring()
+    page -> RN : ReactNativeWebView.postMessage(JSON) with
+                 { type: "status"|"connected"|"user"|"ai"|"error"|"ended", ... }
+  The page holds no secrets of its own — it is inert until RN injects the ephemeral
+  client secret (single-session, short TTL). Audio flows device <-> OpenAI directly.
+-->
+</head>
+<body style="background:#000">
+<div id="s" style="color:#444;font:12px -apple-system,sans-serif"></div>
+<script>
+'use strict';
+var pc = null, mic = null, dc = null;
+
+function send(msg) {
+  var json = JSON.stringify(msg);
+  if (window.ReactNativeWebView) { window.ReactNativeWebView.postMessage(json); }
+  else { document.getElementById('s').textContent += json + '\n'; } // direct-browser debugging
+}
+
+window.startSparring = async function (cfg) {
+  try {
+    send({ type: 'status', value: 'connecting' });
+    pc = new RTCPeerConnection();
+
+    var audioEl = new Audio();
+    audioEl.autoplay = true;
+    pc.ontrack = function (e) { audioEl.srcObject = e.streams[0]; };
+
+    mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mic.getTracks().forEach(function (t) { pc.addTrack(t, mic); });
+
+    dc = pc.createDataChannel('oai-events');
+    dc.onmessage = function (e) {
+      var ev; try { ev = JSON.parse(e.data); } catch (_) { return; }
+      // learner speech (input transcription) — RN does target detection + SRS grading on this
+      if (ev.type && ev.type.indexOf('input_audio_transcription') >= 0
+          && ev.type.slice(-9) === 'completed' && ev.transcript) {
+        send({ type: 'user', text: ev.transcript });
+      }
+      if (ev.type === 'response.output_audio_transcript.done' && ev.transcript) {
+        send({ type: 'ai', text: ev.transcript });
+      }
+      if (ev.type === 'error') {
+        send({ type: 'error', message: JSON.stringify(ev.error || ev).slice(0, 300) });
+      }
+    };
+
+    var offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    var res = await fetch('https://api.openai.com/v1/realtime/calls?model=' + encodeURIComponent(cfg.model), {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + cfg.clientSecret, 'Content-Type': 'application/sdp' },
+      body: offer.sdp,
+    });
+    if (!res.ok) { throw new Error('call setup ' + res.status + ': ' + (await res.text()).slice(0, 200)); }
+    await pc.setRemoteDescription({ type: 'answer', sdp: await res.text() });
+
+    send({ type: 'connected' });
+  } catch (err) {
+    send({ type: 'error', message: String(err && err.message || err) });
+    window.stopSparring();
+  }
+};
+
+window.stopSparring = function () {
+  try { if (dc) dc.close(); } catch (_) {}
+  try { if (pc) pc.close(); } catch (_) {}
+  try { if (mic) mic.getTracks().forEach(function (t) { t.stop(); }); } catch (_) {}
+  dc = pc = mic = null;
+  send({ type: 'ended' });
+};
+
+send({ type: 'status', value: 'ready' });
+</script>
+</body>
+</html>

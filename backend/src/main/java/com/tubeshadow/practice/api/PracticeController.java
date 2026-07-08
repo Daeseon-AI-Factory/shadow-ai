@@ -25,9 +25,13 @@ import com.tubeshadow.practice.api.dto.SentenceTransformSetResponse;
 import com.tubeshadow.practice.api.dto.TransformCheckRequest;
 import com.tubeshadow.practice.api.dto.TransformCheckResponse;
 import com.tubeshadow.practice.api.dto.TransformGenerateRequest;
+import com.tubeshadow.practice.api.dto.SparringSessionRequest;
+import com.tubeshadow.practice.api.dto.SparringSessionResponse;
 import com.tubeshadow.practice.api.dto.TranscribeResponse;
 import com.tubeshadow.practice.application.CompositionService;
+import com.tubeshadow.practice.infrastructure.SparringClient;
 import com.tubeshadow.practice.infrastructure.TranscriptionClient;
+import com.tubeshadow.practice.prompt.SparringPrompt;
 import com.tubeshadow.practice.prompt.MockInterviewPrompt;
 import com.tubeshadow.practice.application.PracticeProgressService;
 import com.tubeshadow.practice.application.PracticeSrsService;
@@ -63,16 +67,19 @@ public class PracticeController {
     private final TransformService transformService;
     private final SeedService seedService;
     private final TranscriptionClient transcriptionClient;
+    private final SparringClient sparringClient;
 
     public PracticeController(PracticeProgressService service, PracticeSrsService srsService,
                              CompositionService compositionService, TransformService transformService,
-                             SeedService seedService, TranscriptionClient transcriptionClient) {
+                             SeedService seedService, TranscriptionClient transcriptionClient,
+                             SparringClient sparringClient) {
         this.service = service;
         this.srsService = srsService;
         this.compositionService = compositionService;
         this.transformService = transformService;
         this.seedService = seedService;
         this.transcriptionClient = transcriptionClient;
+        this.sparringClient = sparringClient;
     }
 
     @GetMapping("/progress")
@@ -180,6 +187,19 @@ public class PracticeController {
             @Valid @RequestBody TransformCheckRequest request) {
         return ApiResponse.ok(transformService.check(
                 request.op(), request.baseSentence(), request.model(), request.attempt()));
+    }
+
+    @PostMapping("/sparring/session")
+    @Operation(summary = "실시간 음성 스파링 세션 발급 — OpenAI Realtime ephemeral key (서버 키 비공개, 오디오는 앱↔OpenAI 직결)")
+    public ApiResponse<SparringSessionResponse> sparringSession(@CurrentUser AuthenticatedUser user,
+                                                                @Valid @RequestBody SparringSessionRequest request) {
+        List<SparringPrompt.Target> targets = request.targets() == null
+                ? List.of()
+                : request.targets().stream()
+                    .map(t -> new SparringPrompt.Target(t.label(), t.ko()))
+                    .toList();
+        SparringClient.MintedSession minted = sparringClient.mintSession(request.mode(), targets);
+        return ApiResponse.ok(new SparringSessionResponse(minted.clientSecret(), minted.model()));
     }
 
     @GetMapping("/seeds")

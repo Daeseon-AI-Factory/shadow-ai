@@ -28,6 +28,12 @@ export default function PracticeMenuScreen() {
 
   const recommended: Tool[] = [
     {
+      href: '/sparring',
+      title: t('home.sparring'),
+      sub: t('home.sparringSub'),
+      icon: { ios: 'waveform.circle.fill', android: 'record_voice_over', web: 'record_voice_over' },
+    },
+    {
       href: '/today',
       title: t('home.today'),
       sub: t('home.todaySub'),

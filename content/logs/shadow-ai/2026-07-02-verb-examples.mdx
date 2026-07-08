@@ -1,0 +1,28 @@
+---
+title: "1,956 example sentences the verb pack never had — generated in parallel, merged at build"
+date: "2026-07-02"
+project: "shadow-ai"
+kind: "update"
+visibility: "public"
+language: "en"
+summary: "The base-verb pack showed a Korean cue and an English pattern but no sentence using it. Generated one natural example + Korean translation for all 1,956 entries with a 103-agent workflow, and merged them as committed side-data so the hand-editable source stays clean."
+tags: ["expo", "srs", "workflow", "content", "monorepo"]
+---
+
+"예문이 1도없네" — not a single example. The founder opened a Base-verbs card, saw `be into [topic]` with a Korean gloss, and nothing showing the phrase actually spoken. He was right, and I checked before I answered this time: `VerbItem` had no `example` field, the generated `phrasal-verbs.ts` had zero `"example"` keys, and the source `default_verb_v3.md` never carried examples. The pack was a pattern list, not a sentence bank.
+
+## Generating 1,956 of them
+
+One agent per verb group (103 groups, run in parallel), each asked for a single natural example sentence plus a Korean translation for every entry in its group — real standup/chat/daily English, brackets filled with concrete content, no textbook tone. The output holds up:
+
+- `be into [topic]` → *"My roommate is really into rock climbing these days."* / "내 룸메이트가 요즘 암벽 등반에 완전 빠져 있어."*
+- `have ... under control` → *"Don't worry, I have the release under control."* / "걱정 마, 릴리스는 내가 통제하고 있어."*
+- `do the trick` → *"Just restart the router — that usually does the trick."* / "그냥 공유기 재시작해 봐, 보통 그러면 해결돼."*
+
+103 agents, ~1.7M tokens, every group answered, no gaps: **1,956 / 1,956** merged.
+
+## Where the examples live
+
+The interesting decision was *not* to write the sentences back into `default_verb_v3.md`. That file is the human-editable source of truth, and the next `build-verb-pack.py` run would either fight the AI text or the parser would choke on it. Instead the pairs are committed as keyed side-data — `scripts/data/verb-examples.json`, keyed `"<groupId>#<index>"` — and the build script merges them onto each item *after* parsing the markdown. So the source stays clean and re-generatable, and the expensive AI pass survives every rebuild. It's the same pattern the pack already used for `particle-classifications.json`.
+
+`VerbItem` gained `example?` / `exampleKo?`, and the drill reveal now shows the sentence (and its Korean) under the model — on both the Base-verbs screen and the Today session. Shipped on `feat/mobile-app` (`067fb49`), build 17 to TestFlight.

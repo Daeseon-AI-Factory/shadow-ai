@@ -1,0 +1,57 @@
+---
+title: "Realtime voice sparring v1 — your due SRS cards ride into a live conversation"
+date: "2026-07-07"
+project: "shadow-ai"
+kind: "update"
+visibility: "public"
+language: "en"
+summary: "First in-app realtime voice feature: OpenAI Realtime sparring where today's due SRS cards are secretly planted in the conversation, detected when you actually say them, and graded on the spot. Shipped with zero new native dependencies via a hidden WebView WebRTC bridge."
+tags: ["realtime", "openai", "webrtc", "expo", "spring-boot", "srs"]
+---
+
+MiMi has drills, shadowing, and a Leitner SRS — but everything ended at "외웠다".
+Today the loop closes: a realtime voice sparring partner (OpenAI `gpt-realtime`,
+native speech-to-speech) where **the conversation itself is the review**.
+
+## How it works
+
+1. The app picks up to 6 of today's **due SRS cards** (verb pack, phrasal-500,
+   collocations — short, sayable chunks only).
+2. The backend mints an ephemeral OpenAI Realtime secret and builds the session
+   instructions: a fixed persona prefix (prompt-cache friendly) plus a *secret
+   coaching goal* — steer the conversation so the learner gets natural openings
+   to use those exact expressions, without ever quizzing.
+3. Audio flows phone ↔ OpenAI directly over WebRTC. When the live transcript
+   shows the learner actually *said* a target ("figured it out" matches
+   "figure out" — conjugation-tolerant, separable-phrasal-verb-tolerant), the
+   chip turns green and the card is graded correct through the existing SRS API.
+4. Two modes, same engine, different 사용감: **Free talk** (250 ms VAD — a
+   quick-witted friend who pounces the moment you finish) and **Mock interview**
+   (800 ms VAD — a patient Canadian tech interviewer who lets an ESL candidate
+   organize long answers). The interview mode is the founder's own Canada job
+   prep, dogfooded.
+
+## The interesting engineering choice
+
+No `react-native-webrtc`. The app already ships `react-native-webview` (YouTube
+transcripts), so v1 borrows the browser's WebRTC through a **hidden, headless
+bridge page** served from the backend over HTTPS: React Native injects the
+ephemeral secret, the page handles mic ↔ OpenAI audio, and transcripts come back
+over `postMessage` while all visible UI stays native. Zero new native
+dependencies, zero new build risk, and the transport can be swapped for a native
+module later without touching the product logic.
+
+Key custody stays clean: the raw `OPENAI_API_KEY` never leaves the server (it
+was already there for transcription); the client only ever holds a
+single-session, short-TTL secret.
+
+## Verified
+
+- Prompt builder unit tests + full practice suite green (Testcontainers).
+- Mobile `tsc` clean; `/sparring` typed route generated.
+- Local end-to-end: `/sparring.html` served unauthenticated (200), and a real
+  mint round-trip against OpenAI returned a `clientSecret` for `gpt-realtime`.
+- On-device mic/audio smoke happens with the next TestFlight build (WebRTC needs
+  a physical phone).
+
+Commit: `048c02e`.
