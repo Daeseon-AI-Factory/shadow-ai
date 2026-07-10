@@ -1261,3 +1261,56 @@ The SRS itself was fine: `drill-runner.tsx` already calls `practiceApi.grade(key
 
 <!-- override-trigger: 79e8f9a docs(log): realtime voice sparring v1 — WebView bridge decision (048c02e) [no-log] — false positive: this commit IS the log pair for feature commit 048c02e (troubleshooting entry + mdx narrative, both included in it); the keyword "decision" is in the log title, not an unlogged change -->
 <!-- skipped: dc1c646 chore(log): mark 79e8f9a as log-pair commit, trigger false positive [no-log] -->
+<!-- skipped: d03bf8a chore(log): hook skip marker for dc1c646 [no-log] -->
+
+---
+
+## 2026-07-09 — NCP → Vultr 이관/폐기: "다 껐다"의 함정 3종
+
+**Symptom (돈이 계속 나감).** `terraform destroy`로 MiMi NCP 박스를 지운 뒤 "NCP 전부 종료"라고 보고했으나, 대시보드 청구가 계속 올라갔다(월 추정 12,320원). 계정 API로 훑으니 별도 서버가 남아있었다:
+```
+SERVERS: 1
+  - beside-app running
+BLOCK_STORAGES: 1
+  - beside-app 10737418240
+PUBLIC_IPS: 1
+  - 101.79.22.156
+```
+
+**Cause (검증됨).** `terraform destroy`는 **해당 terraform state에 있는 리소스만** 지운다. beside는 mimi terraform 밖의 별도 배포라 그대로 남아 과금됐다. "계정이 0인지"는 terraform이 아니라 **계정 단위 API 조회**로만 확인 가능.
+
+**Fix (실제 파일/명령).** NCP API(`/vserver/v2/*`, HMAC-SHA256 v2 서명, 키는 `~/.secrets/api-keys.env`의 `NCLOUD_ACCESS_KEY/SECRET_KEY`)로 계정 전체를 조회: `getServerInstanceList` / `getBlockStorageInstanceList` / `getPublicIpInstanceList` / `getCloudPostgresqlInstanceList` + Object Storage는 S3(`aws --endpoint-url https://kr.object.ncloudstorage.com s3 ls`). 최종 확인: 서버 0 / 스토리지 0 / IP 0 / 관리형PG 0 / 버킷 0.
+
+**Commit.** (이 로그 커밋)
+
+**Pattern.** 멀티프로젝트/멀티툴이 얹힌 클라우드 계정에서 "다 지웠다"는 **반드시 계정 단위 리스트로 증명**한다. 관리 도구(terraform) 하나의 성공은 계정 전체를 대변하지 않는다.
+
+---
+
+## 2026-07-09 — 마운트된 NCP 블록 스토리지는 서버 정지 전엔 삭제 불가
+
+**Symptom.**
+```
+Status: 400 Bad Request ... "returnCode": "3001008",
+"returnMessage": "1 storage returns failed. mimi-data(141595000) :
+ The storage is mounted on the server. Please unmount the storage and try again."
+```
+`terraform destroy`가 block_storage를 server보다 먼저 반납하려다 실패. 공인 IP를 이미 반납한 뒤라 SSH 언마운트도 불가.
+
+**Cause (검증됨).** NCP는 실행 중 서버에 attach된 블록 스토리지를 반납하지 못하게 막는다. block_storage → server 의존성 때문에 terraform은 destroy 시 스토리지를 먼저 지우려 하고, 서버가 살아있어 거부당한다.
+
+**Fix.** NCP API `stopServerInstances`로 **서버를 먼저 정지** → `getServerInstanceList`로 `stopped(NSTOP)` 확인 → `terraform destroy -auto-approve` 재실행. 그러면 storage→server 순으로 정상 삭제. (별도 서버는 `stopServerInstances` → `returnServerInstances`.)
+
+**Pattern.** 클라우드 자원 삭제 순서: **compute 정지 → attached storage 반납 → server 반납 → 네트워크/IP**. 파괴적 명령이 의존성 역순으로 꼬이면 targeted가 아니라 "상태를 바꾸는 선행 조치(정지)"부터.
+
+---
+
+## 2026-07-09 — 이관 시 JWT_SECRET 재생성 → 전 세션 무효화 → "로그인창 느림"
+
+**Symptom.** 앱을 켜면 한참 있다가 로그인창이 뜬다(체감 지연).
+
+**Cause (검증됨).** 새 Vultr 백엔드 `.env`에 JWT_SECRET을 **새로 생성**했더니 앱에 저장된 옛 토큰(옛 서명키 서명)이 401로 거부됨. `_layout.tsx` 부팅 흐름: 저장 토큰으로 hydrate → 홈 첫 쿼리 → 401 → `setUnauthorizedHandler`가 `signOut()`+`/login`. 그 서버 왕복(캐나다↔서울 ~0.5s)이 지연으로 보임. 서버 응답 자체는 ~0.5s로 정상(박스 부하 낮음).
+
+**Fix.** 사용자 재로그인 1회 → 새 서명키 토큰 발급 → 이후 부팅은 홈 직행. 비번은 bcrypt라 JWT_SECRET과 무관하게 유효. **세션 연속성을 원하면 이관 시 JWT_SECRET을 보존**할 것.
+
+**Pattern.** 백엔드 이관 체크리스트에 "서명/암호화 시크릿 보존 여부"를 명시. 새로 만들면 전 사용자 강제 로그아웃이 부작용으로 따라온다.
