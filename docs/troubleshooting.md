@@ -1316,3 +1316,26 @@ Status: 400 Bad Request ... "returnCode": "3001008",
 **Pattern.** 백엔드 이관 체크리스트에 "서명/암호화 시크릿 보존 여부"를 명시. 새로 만들면 전 사용자 강제 로그아웃이 부작용으로 따라온다.
 
 <!-- skipped: 4e26edf docs(log): NCP→Vultr 이관·폐기 회고 — 계정단위 확인/마운트순서/JWT세션 무효화 -->
+<!-- skipped: 90fac58 chore(log): mark 4e26edf as log-pair commit [no-log] -->
+
+---
+
+## 2026-07-10 — [장애] 앱 전면 다운: 공유 Caddyfile에서 라우팅 블록이 사라짐 (동시작업 충돌)
+
+**Symptom.** 폰 앱이 백엔드에 못 붙음. api.mimi 로컬 curl 5회 전부:
+```
+try1: HTTP 000 tls=0.000000s total=0.478018s
+...
+error="Get \"https://api.mimi.daeseon.ai/api/health\": remote error: tls: internal error"  (k6, error_code 1010)
+```
+api.jjan / beside 도 동일하게 HTTP 000. docvault(303)·faangforge(200)만 정상.
+
+**Cause (검증됨).** 백엔드는 정상이었다(`mimi-backend Up 24h (healthy)`), 인증서도 있었다(`/data/caddy/certificates/.../api.mimi.daeseon.ai/{crt,key,json}` 존재). 진짜 원인: **활성 Caddyfile(`/root/ds-forge/deploy/Caddyfile`, ds-forge-caddy-1이 마운트)에서 api.mimi·api.jjan·beside 사이트 블록이 통째로 사라져 있었다** (`grep -in mimi` → 없음, 남은 건 {$DOMAIN}·docvault·docvault-demo뿐). Caddy는 site block이 없는 SNI에 대해 TLS 핸드셰이크를 `internal error`로 끊는다 → curl/k6 000. 이 박스는 여러 프로젝트(mimi·jjan·beside·docvault·faangforge)가 한 Caddy를 공유하는데, **병렬로 돌던 다른 세션이 이 파일을 재정리하며 세 블록을 떨궜다.**
+
+**Fix (실제 파일/명령).** 인증서·업스트림은 멀쩡했으므로 블록만 복원:
+1. 업스트림 도달성 먼저 검증 — `docker exec ds-forge-caddy-1 getent hosts jjan-api` → `172.18.0.8` (jjan-api·jjan-game·beside-web·mimi-backend 전부 caddy 네트워크 `ds-forge_default`에서 해석됨. jjan-api `/`가 404인 건 정상).
+2. `api.mimi` 블록 append + `api.jjan`·`beside` 블록은 원본 `/opt/mimi/Caddyfile`에서 중괄호 균형 맞춰 **verbatim 추출** 후 append (추측 금지). `api-ncp.jjan`은 DNS가 죽은 NCP(223.130.161.55)를 가리켜 **의도적 제외** — 넣으면 ACME 챌린지 실패 → rate limit 위험.
+3. `caddy validate --adapter caddyfile` (→ `Valid configuration`) **후에만** `caddy reload`. 백업: `Caddyfile.bak.mimi-restore.*`, `Caddyfile.bak.canon.*`.
+4. 검증: api.mimi `/api/health` 200·`/sparring.html` 200, api.jjan 404(도달), beside 307(도달), 전 도메인 000 해소.
+
+**Pattern.** 한 Caddy를 여러 프로젝트가 공유하면 **Caddyfile 편집을 한 곳으로 몰거나(단일 정본), 모든 블록을 담은 정본을 베이스로만 재생성**하라. 한 세션의 부분 재작성이 남의 도메인을 조용히 삭제하고, 증상은 "백엔드 멀쩡한데 TLS부터 실패"로 나와 원인이 백엔드가 아니라 **라우팅 config 부재**임을 놓치기 쉽다. 확인 순서: 컨테이너 살아있나 → 인증서 있나 → **활성 config에 그 도메인 블록이 있나**.
