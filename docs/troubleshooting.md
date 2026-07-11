@@ -1341,3 +1341,6 @@ api.jjan / beside 도 동일하게 HTTP 000. docvault(303)·faangforge(200)만 �
 **Pattern.** 한 Caddy를 여러 프로젝트가 공유하면 **Caddyfile 편집을 한 곳으로 몰거나(단일 정본), 모든 블록을 담은 정본을 베이스로만 재생성**하라. 한 세션의 부분 재작성이 남의 도메인을 조용히 삭제하고, 증상은 "백엔드 멀쩡한데 TLS부터 실패"로 나와 원인이 백엔드가 아니라 **라우팅 config 부재**임을 놓치기 쉽다. 확인 순서: 컨테이너 살아있나 → 인증서 있나 → **활성 config에 그 도메인 블록이 있나**.
 
 <!-- skipped: 910631d docs(log): [장애] 공유 Caddyfile 라우팅 삭제로 앱 다운 — 원인/복구/정본화 회고 -->
+<!-- skipped: 5d8ee39 chore(log): mark 910631d as log-pair commit [no-log] -->
+
+<!-- skipped: 59dc64d test(core): sparring-detect 유닛테스트 (test-only, no behavior change) -->
