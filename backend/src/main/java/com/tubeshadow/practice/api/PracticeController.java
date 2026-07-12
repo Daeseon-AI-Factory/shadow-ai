@@ -193,6 +193,7 @@ public class PracticeController {
     @Operation(summary = "실시간 음성 스파링 세션 발급 — OpenAI Realtime ephemeral key (서버 키 비공개, 오디오는 앱↔OpenAI 직결)")
     public ApiResponse<SparringSessionResponse> sparringSession(@CurrentUser AuthenticatedUser user,
                                                                 @Valid @RequestBody SparringSessionRequest request) {
+        sparringClient.assertAllowed(user.email()); // paid feature — allowlist only (deny-by-default)
         List<SparringPrompt.Target> targets = request.targets() == null
                 ? List.of()
                 : request.targets().stream()

@@ -87,6 +87,10 @@ tubeshadow:
     base-url: ${SPARRING_BASE_URL:https://api.openai.com}
     model: ${SPARRING_MODEL:gpt-realtime}
     voice: ${SPARRING_VOICE:marin}
+    # Allowlist (comma-separated emails) for the paid realtime feature. DENY-BY-DEFAULT:
+    # if blank, NO ONE can mint a sparring session (safe for public launch). Set to the
+    # owner's email(s) so only they can use it.
+    allowed-emails: ${SPARRING_ALLOWED_EMAILS:}
   transcription:
     # Speech-to-text — OpenAI gpt-4o-transcribe by default (low hallucination, dev-jargon accurate).
     # OpenAI-compatible, so pointing base-url/path/model at Groq whisper-large-v3 swaps providers.

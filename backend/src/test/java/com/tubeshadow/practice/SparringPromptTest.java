@@ -1,13 +1,18 @@
 package com.tubeshadow.practice;
 
+import com.tubeshadow.common.exception.BusinessException;
 import com.tubeshadow.practice.infrastructure.SparringClient;
+import com.tubeshadow.practice.infrastructure.SparringProperties;
 import com.tubeshadow.practice.prompt.SparringPrompt;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 class SparringPromptTest {
 
@@ -36,6 +41,28 @@ class SparringPromptTest {
     @Test
     void unknownModeFallsBackToChat() {
         assertThat(SparringPrompt.build("whatever", null)).isEqualTo(SparringPrompt.CHAT_PERSONA);
+    }
+
+    private SparringClient clientWithAllowlist(String allowed) {
+        return new SparringClient(
+                new SparringProperties("key", "https://api.openai.com", "gpt-realtime", "marin", allowed),
+                new ObjectMapper());
+    }
+
+    @Test
+    void allowlistBlocksEveryoneWhenBlank() {
+        SparringClient c = clientWithAllowlist("");
+        assertThatThrownBy(() -> c.assertAllowed("anyone@example.com"))
+                .isInstanceOf(BusinessException.class); // deny-by-default
+    }
+
+    @Test
+    void allowlistPermitsListedEmailCaseInsensitively() {
+        SparringClient c = clientWithAllowlist("owner@example.com, second@example.com");
+        assertThatCode(() -> c.assertAllowed("Owner@Example.com")).doesNotThrowAnyException();
+        assertThatThrownBy(() -> c.assertAllowed("stranger@example.com"))
+                .isInstanceOf(BusinessException.class);
+        assertThatThrownBy(() -> c.assertAllowed(null)).isInstanceOf(BusinessException.class);
     }
 
     @Test
