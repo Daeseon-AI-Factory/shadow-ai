@@ -1359,3 +1359,18 @@ api.jjan / beside 도 동일하게 HTTP 000. docvault(303)·faangforge(200)만 �
 **Commit.** `bee05f2`
 
 **Pattern.** 분당 과금 외부 API를 감싸는 엔드포인트는 **deny-by-default 허용목록**으로 출시하라. "일단 열고 나중에 잠근다"는 그 사이 청구서로 돌아온다. 허용목록은 재빌드 없이 env 한 줄로 조정 가능하게.
+<!-- skipped: dc4ff40 docs(log): 유료 스파링 allowlist 게이트 (bee05f2) — deny-by-default 비용보호 [no-log] -->
+
+---
+
+## 2026-07-11 — AI 엔드포인트 전체를 단일 허용목록으로 잠금 (AiGate)
+
+**Symptom (사전 방지).** 스파링만 막았더니 채점(compose/scenario/interview, Gemini)·음성전사(Whisper)는 여전히 아무 로그인 유저나 호출 가능 — 공개 오픈 시 잔여 AI 비용/할당량 노출.
+
+**Fix.** `AiGate`(deny-by-default) 컴포넌트 하나 만들어 **모든 AI 엔드포인트**(compose/check·mix·story, scenario/check, interview/mock·check, transcribe, compose/transforms·transform-check, sparring/session)에 `aiGate.assertAllowed(user.email())` 적용. 단일 스위치 `AI_ALLOWED_EMAILS`가 스파링 게이트까지 함께 구동(application.yml의 sparring allowed-emails도 `${AI_ALLOWED_EMAILS}` 참조). **비-AI 기능(YouTube 쉐도잉·드릴·SRS)은 게이트 없음 → 무료 공개.**
+
+**검증 (라이브, 랜덤 신규계정).** compose/check 403, interview/mock 403, sparring 403, **srs(비-AI) 200**. 유닛테스트 `AiGateTest`(빈목록 전원차단 / 대소문자 허용 / null 차단). backend healthy, `printenv AI_ALLOWED_EMAILS` 로드 확인.
+
+**Commit.** `90988de`
+
+**Pattern.** "무료 = 마진 0 기능(정적 콘텐츠·재생·DB), 유료/제한 = 외부 모델 호출"로 경계를 그어라. 게이트는 **엔드포인트마다 개별 호출**이라도 로직은 **한 컴포넌트+한 env**로 모아 스위치를 단일화(추가/제거가 env 한 줄).

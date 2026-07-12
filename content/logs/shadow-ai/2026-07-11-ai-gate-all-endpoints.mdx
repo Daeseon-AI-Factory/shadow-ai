@@ -1,0 +1,35 @@
+---
+title: "무료/유료 경계 긋기 — AI 호출 전부에 단일 자물쇠, 유튜브·드릴·복습은 오픈"
+date: "2026-07-11"
+project: "shadow-ai"
+kind: "monetization"
+visibility: "private"
+language: "ko"
+summary: "공개 오픈을 앞두고 모든 AI 엔드포인트(채점·전사·모의면접·스파링)를 단일 허용목록(AI_ALLOWED_EMAILS, deny-by-default)으로 잠갔다. 비용이 0인 유튜브 쉐도잉·드릴·SRS 복습은 그대로 열어 무료 체험의 핵심으로 남긴다."
+tags: ["monetization", "cost-control", "access-control", "product"]
+---
+
+## 경계
+
+앱을 사람들에게 열 때 질문은 "무엇을 공짜로 줄까"다. 답을 비용 구조로 그었다:
+
+- **무료(누구나):** YouTube 반복재생·쉐도잉, 드릴, SRS 복습 — **서버가 외부 모델을
+  안 부르니 한계비용 0.** 오히려 이게 앱의 습관 형성 핵심이라 활짝 연다.
+- **제한(지금은 소유자만):** AI 채점·음성전사·모의면접·실시간 스파링 — **전부 외부
+  모델(Gemini/OpenAI) 호출 = 돈/할당량.**
+
+## 구현
+
+`AiGate` 컴포넌트 하나(deny-by-default) + `AI_ALLOWED_EMAILS` 단일 스위치. 모든 AI
+엔드포인트 진입부에서 `assertAllowed(email)`. 목록에 없으면 403. 스파링 게이트도 같은
+env를 읽어 스위치가 하나다. 사용자 추가는 재빌드 없이 env 한 줄.
+
+## 검증
+
+랜덤 신규 계정으로: compose/check·interview/mock·sparring 전부 403, **비-AI인 SRS는
+200**(열림 유지). 유닛테스트로 빈-목록-전원차단 / 대소문자-허용 / null-차단 커버.
+
+## 다음
+
+정식 유료화 시 이 게이트의 판정을 이메일 목록 → **구독/크레딧 잔량**으로 승격.
+지금은 "무료의 경계를 비용선에 맞추고, 그 너머는 기본 잠금"이 핵심.
