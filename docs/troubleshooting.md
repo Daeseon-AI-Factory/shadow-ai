@@ -1344,3 +1344,18 @@ api.jjan / beside 도 동일하게 HTTP 000. docvault(303)·faangforge(200)만 �
 <!-- skipped: 5d8ee39 chore(log): mark 910631d as log-pair commit [no-log] -->
 
 <!-- skipped: 59dc64d test(core): sparring-detect 유닛테스트 (test-only, no behavior change) -->
+<!-- skipped: aaf522b chore(log): mark 59dc64d test-only [no-log] -->
+
+---
+
+## 2026-07-11 — 유료 실시간 스파링 무단 사용 차단 (allowlist, deny-by-default)
+
+**Symptom (사전 방지).** 앱을 일반에 오픈하면 아무 로그인 유저나 `/api/practice/sparring/session`을 호출해 OpenAI Realtime(분당 과금) 세션을 발급받을 수 있었다 — 비용 폭탄 위험.
+
+**Fix.** `SparringClient.assertAllowed(email)` 게이트를 컨트롤러 진입부에 추가. `SPARRING_ALLOWED_EMAILS`(콤마 구분) 허용목록에 없으면 403 `SPARRING_NOT_ALLOWED`. **deny-by-default**: 목록이 비면 아무도 못 쓴다(공개 오픈 시 안전). 배포: 박스에서 이미지 재빌드 → `/opt/mimi-app/.env`에 `SPARRING_ALLOWED_EMAILS=<owner>` → `docker compose up -d`.
+
+**검증.** 랜덤 신규 계정 → `HTTP 403 {"code":"SPARRING_NOT_ALLOWED"}`. 유닛테스트 `SparringPromptTest`: 빈 목록=전원 차단, 목록 지정=대소문자 무시 허용, null 차단. `mimi-backend` healthy, `printenv SPARRING_ALLOWED_EMAILS` 로드 확인.
+
+**Commit.** `bee05f2`
+
+**Pattern.** 분당 과금 외부 API를 감싸는 엔드포인트는 **deny-by-default 허용목록**으로 출시하라. "일단 열고 나중에 잠근다"는 그 사이 청구서로 돌아온다. 허용목록은 재빌드 없이 env 한 줄로 조정 가능하게.
