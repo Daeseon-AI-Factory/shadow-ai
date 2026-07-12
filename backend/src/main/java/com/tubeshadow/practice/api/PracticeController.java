@@ -28,6 +28,7 @@ import com.tubeshadow.practice.api.dto.TransformGenerateRequest;
 import com.tubeshadow.practice.api.dto.SparringSessionRequest;
 import com.tubeshadow.practice.api.dto.SparringSessionResponse;
 import com.tubeshadow.practice.api.dto.TranscribeResponse;
+import com.tubeshadow.practice.application.AiGate;
 import com.tubeshadow.practice.application.CompositionService;
 import com.tubeshadow.practice.infrastructure.SparringClient;
 import com.tubeshadow.practice.infrastructure.TranscriptionClient;
@@ -68,11 +69,12 @@ public class PracticeController {
     private final SeedService seedService;
     private final TranscriptionClient transcriptionClient;
     private final SparringClient sparringClient;
+    private final AiGate aiGate;
 
     public PracticeController(PracticeProgressService service, PracticeSrsService srsService,
                              CompositionService compositionService, TransformService transformService,
                              SeedService seedService, TranscriptionClient transcriptionClient,
-                             SparringClient sparringClient) {
+                             SparringClient sparringClient, AiGate aiGate) {
         this.service = service;
         this.srsService = srsService;
         this.compositionService = compositionService;
@@ -80,6 +82,7 @@ public class PracticeController {
         this.seedService = seedService;
         this.transcriptionClient = transcriptionClient;
         this.sparringClient = sparringClient;
+        this.aiGate = aiGate;
     }
 
     @GetMapping("/progress")
@@ -119,6 +122,7 @@ public class PracticeController {
     @Operation(summary = "영작 1문장 AI 채점 — 패턴/청크를 맞게 썼는지 + 더 나은 버전")
     public ApiResponse<ComposeFeedback> composeCheck(@CurrentUser AuthenticatedUser user,
                                                      @Valid @RequestBody ComposeCheckRequest request) {
+        aiGate.assertAllowed(user.email());
         return ApiResponse.ok(compositionService.check(request.target(), request.gloss(), request.sentence()));
     }
 
@@ -126,6 +130,7 @@ public class PracticeController {
     @Operation(summary = "여러 청크 → 말되는 한 문장으로 조합 (AI). 못 합치면 usedAll=false + note")
     public ApiResponse<MixResponse> composeMix(@CurrentUser AuthenticatedUser user,
                                                @Valid @RequestBody MixRequest request) {
+        aiGate.assertAllowed(user.email());
         return ApiResponse.ok(compositionService.mix(request.chunks()));
     }
 
@@ -133,6 +138,7 @@ public class PracticeController {
     @Operation(summary = "오늘 배운 청크들 → 하나의 짧은 문단으로 합성 (AI). 외우기/쉐도잉용")
     public ApiResponse<StoryResponse> composeStory(@CurrentUser AuthenticatedUser user,
                                                    @Valid @RequestBody StoryRequest request) {
+        aiGate.assertAllowed(user.email());
         return ApiResponse.ok(compositionService.story(request.chunks()));
     }
 
@@ -140,6 +146,7 @@ public class PracticeController {
     @Operation(summary = "상황 영작 AI 채점 (관대) — 상황에 맞으면 통과, 모범답안 강요 X")
     public ApiResponse<ScenarioFeedback> scenarioCheck(@CurrentUser AuthenticatedUser user,
                                                        @Valid @RequestBody ScenarioCheckRequest request) {
+        aiGate.assertAllowed(user.email());
         return ApiResponse.ok(compositionService.scenarioCheck(
                 request.situation(), request.koreanHint(), request.sample(), request.answer()));
     }
@@ -148,6 +155,7 @@ public class PracticeController {
     @Operation(summary = "음성 전사 (Whisper) — 개발 용어 정확 인식")
     public ApiResponse<TranscribeResponse> transcribe(@CurrentUser AuthenticatedUser user,
                                                       @RequestParam("file") MultipartFile file) throws IOException {
+        aiGate.assertAllowed(user.email());
         return ApiResponse.ok(new TranscribeResponse(
                 transcriptionClient.transcribe(file.getBytes(), file.getOriginalFilename())));
     }
@@ -162,6 +170,7 @@ public class PracticeController {
                     .map(h -> new MockInterviewPrompt.Turn(h.role(), h.text()))
                     .toList();
         long seed = request.seed() != null ? request.seed() : System.nanoTime();
+        aiGate.assertAllowed(user.email());
         return ApiResponse.ok(compositionService.mockNext(turns, seed));
     }
 
@@ -169,6 +178,7 @@ public class PracticeController {
     @Operation(summary = "인터뷰 답변 AI 채점 (관대) — 핵심만 맞으면 통과, 억지 교정 X")
     public ApiResponse<InterviewCheckResponse> interviewCheck(@CurrentUser AuthenticatedUser user,
                                                               @Valid @RequestBody InterviewCheckRequest request) {
+        aiGate.assertAllowed(user.email());
         return ApiResponse.ok(compositionService.interviewCheck(request.question(), request.answer(), Boolean.TRUE.equals(request.precision())));
     }
 
@@ -177,6 +187,7 @@ public class PracticeController {
     public ApiResponse<SentenceTransformSetResponse> generateTransforms(
             @CurrentUser AuthenticatedUser user,
             @Valid @RequestBody TransformGenerateRequest request) {
+        aiGate.assertAllowed(user.email());
         return ApiResponse.ok(transformService.generate(user.id(), request.baseSentence(), request.baseGloss()));
     }
 
@@ -185,6 +196,7 @@ public class PracticeController {
     public ApiResponse<TransformCheckResponse> checkTransform(
             @CurrentUser AuthenticatedUser user,
             @Valid @RequestBody TransformCheckRequest request) {
+        aiGate.assertAllowed(user.email());
         return ApiResponse.ok(transformService.check(
                 request.op(), request.baseSentence(), request.model(), request.attempt()));
     }
