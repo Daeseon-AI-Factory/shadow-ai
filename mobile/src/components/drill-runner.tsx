@@ -1,13 +1,15 @@
-import { useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { localToday, practiceApi } from '@shadow-ai/core';
+import { ApiError, localToday, practiceApi } from '@shadow-ai/core';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { t } from '@/lib/i18n';
+
+const ALERT_REOPEN_DELAY_MS = 350;
 
 export interface DrillItem {
   key: string; // SRS card key (pat:… / col:…)
@@ -40,17 +42,76 @@ export function DrillRunner({ items, onCheck }: { items: DrillItem[]; onCheck?: 
   const [revealed, setRevealed] = useState(false);
   const [got, setGot] = useState(0);
   const [streak, setStreak] = useState<number | null>(null);
+  const [feedbackPending, setFeedbackPending] = useState(false);
   const graded = useRef<Set<string>>(new Set());
+  const gradingRef = useRef(false);
+  const feedbackActiveRef = useRef(true);
+  const feedbackPendingRef = useRef(false);
+  const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const qc = useQueryClient();
+
+  useEffect(() => {
+    feedbackActiveRef.current = true;
+    feedbackPendingRef.current = false;
+    setFeedbackPending(false);
+    return () => {
+      feedbackActiveRef.current = false;
+      if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+      feedbackTimerRef.current = null;
+      feedbackPendingRef.current = false;
+    };
+  }, []);
+
+  const releaseGradeFeedback = () => {
+    if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+    feedbackTimerRef.current = null;
+    feedbackPendingRef.current = false;
+    if (feedbackActiveRef.current) setFeedbackPending(false);
+  };
+
+  const queueGradeFeedback = (ok: boolean) => {
+    if (!feedbackActiveRef.current) return;
+    feedbackPendingRef.current = true;
+    setFeedbackPending(true);
+    if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+    feedbackTimerRef.current = setTimeout(() => {
+      feedbackTimerRef.current = null;
+      if (!feedbackActiveRef.current) {
+        releaseGradeFeedback();
+        return;
+      }
+      Alert.alert(
+        t('feedback.gradeFailedTitle'),
+        t('feedback.gradeFailedStayMessage'),
+        [
+          { text: t('common.cancel'), style: 'cancel', onPress: releaseGradeFeedback },
+          {
+            text: t('common.retry'),
+            onPress: () => {
+              releaseGradeFeedback();
+              if (!feedbackActiveRef.current) return;
+              answer(ok);
+            },
+          },
+        ],
+        { cancelable: true, onDismiss: releaseGradeFeedback },
+      );
+    }, ALERT_REOPEN_DELAY_MS);
+  };
 
   const grade = useMutation({
     mutationFn: ({ key, ok }: { key: string; ok: boolean }) =>
       practiceApi.grade(key, ok, localToday()),
     onSuccess: (res) => {
-      setStreak(res.progress.streak);
       // Due/new counts + lapse/mastered stats shift after every grade — refresh the SRS-backed
       // screens (Pattern, Collocation, Weak spots) so they don't show pre-grade state.
       qc.invalidateQueries({ queryKey: ['srs'] });
+      if (!feedbackActiveRef.current) return;
+      setStreak(res.progress.streak);
+    },
+    onError: (error, { ok }) => {
+      if (error instanceof ApiError && error.status === 401) return;
+      queueGradeFeedback(ok);
     },
   });
 
@@ -70,10 +131,21 @@ export function DrillRunner({ items, onCheck }: { items: DrillItem[]; onCheck?: 
 
   const done = pos >= queue.length;
 
-  const answer = (ok: boolean) => {
+  const answer = async (ok: boolean) => {
+    if (!feedbackActiveRef.current || feedbackPendingRef.current) return;
     const cur = queue[pos];
     if (!graded.current.has(cur.key)) {
-      grade.mutate({ key: cur.key, ok });
+      if (gradingRef.current) return;
+      gradingRef.current = true;
+      try {
+        await grade.mutateAsync({ key: cur.key, ok });
+      } catch {
+        // The mutation-level onError explains the retry. Keep this card in place.
+        return;
+      } finally {
+        gradingRef.current = false;
+      }
+      if (!feedbackActiveRef.current) return;
       graded.current.add(cur.key);
       if (ok) setGot((g) => g + 1);
     }
@@ -149,10 +221,18 @@ export function DrillRunner({ items, onCheck }: { items: DrillItem[]; onCheck?: 
                 ) : null}
               </View>
               <View style={styles.row}>
-                <Pressable style={[styles.gradeBtn, styles.again]} onPress={() => answer(false)}>
+                <Pressable
+                  style={[styles.gradeBtn, styles.again]}
+                  disabled={grade.isPending || feedbackPending}
+                  onPress={() => answer(false)}
+                >
                   <ThemedText style={styles.againText}>{t('drill.again')}</ThemedText>
                 </Pressable>
-                <Pressable style={[styles.gradeBtn, styles.gotIt]} onPress={() => answer(true)}>
+                <Pressable
+                  style={[styles.gradeBtn, styles.gotIt]}
+                  disabled={grade.isPending || feedbackPending}
+                  onPress={() => answer(true)}
+                >
                   <ThemedText style={styles.primaryText}>{t('drill.gotIt')}</ThemedText>
                 </Pressable>
               </View>

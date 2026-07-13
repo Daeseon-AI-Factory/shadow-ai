@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { localToday, practiceApi } from '@shadow-ai/core';
+import { ApiError, localToday, practiceApi } from '@shadow-ai/core';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { SpokenCheck } from '@/components/spoken-check';
 import { t } from '@/lib/i18n';
+
+const ALERT_REOPEN_DELAY_MS = 350;
 
 export type IvMode = 'shadow' | 'produce' | 'respond';
 
@@ -54,7 +56,12 @@ export function InterviewDrill({
   const [streak, setStreak] = useState<number | null>(null);
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
   const [showDetail, setShowDetail] = useState(false);
+  const [feedbackPending, setFeedbackPending] = useState(false);
   const graded = useRef<Set<string>>(new Set());
+  const gradingRef = useRef(false);
+  const feedbackActiveRef = useRef(true);
+  const feedbackPendingRef = useRef(false);
+  const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const qc = useQueryClient();
 
   // Speed round: count down while the prompt is unanswered; at 0 the model auto-reveals (too slow
@@ -71,13 +78,66 @@ export function InterviewDrill({
   useEffect(() => {
     if (timeLeft === 0) setRevealed(true);
   }, [timeLeft]);
+  useEffect(() => {
+    feedbackActiveRef.current = true;
+    feedbackPendingRef.current = false;
+    setFeedbackPending(false);
+    return () => {
+      feedbackActiveRef.current = false;
+      if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+      feedbackTimerRef.current = null;
+      feedbackPendingRef.current = false;
+    };
+  }, []);
+
+  const releaseGradeFeedback = () => {
+    if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+    feedbackTimerRef.current = null;
+    feedbackPendingRef.current = false;
+    if (feedbackActiveRef.current) setFeedbackPending(false);
+  };
+
+  const queueGradeFeedback = (ok: boolean) => {
+    if (!feedbackActiveRef.current) return;
+    feedbackPendingRef.current = true;
+    setFeedbackPending(true);
+    if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+    feedbackTimerRef.current = setTimeout(() => {
+      feedbackTimerRef.current = null;
+      if (!feedbackActiveRef.current) {
+        releaseGradeFeedback();
+        return;
+      }
+      Alert.alert(
+        t('feedback.gradeFailedTitle'),
+        t('feedback.gradeFailedStayMessage'),
+        [
+          { text: t('common.cancel'), style: 'cancel', onPress: releaseGradeFeedback },
+          {
+            text: t('common.retry'),
+            onPress: () => {
+              releaseGradeFeedback();
+              if (!feedbackActiveRef.current) return;
+              advance(ok);
+            },
+          },
+        ],
+        { cancelable: true, onDismiss: releaseGradeFeedback },
+      );
+    }, ALERT_REOPEN_DELAY_MS);
+  };
 
   const grade = useMutation({
     mutationFn: ({ key, ok }: { key: string; ok: boolean }) =>
       practiceApi.grade(key, ok, localToday()),
     onSuccess: (res) => {
-      setStreak(res.progress.streak);
       qc.invalidateQueries({ queryKey: ['srs'] });
+      if (!feedbackActiveRef.current) return;
+      setStreak(res.progress.streak);
+    },
+    onError: (error, { ok }) => {
+      if (error instanceof ApiError && error.status === 401) return;
+      queueGradeFeedback(ok);
     },
   });
 
@@ -135,9 +195,20 @@ export function InterviewDrill({
 
   const item = queue[pos];
 
-  const advance = (ok: boolean) => {
+  const advance = async (ok: boolean) => {
+    if (!feedbackActiveRef.current || feedbackPendingRef.current) return;
     if (!graded.current.has(item.key)) {
-      grade.mutate({ key: item.key, ok });
+      if (gradingRef.current) return;
+      gradingRef.current = true;
+      try {
+        await grade.mutateAsync({ key: item.key, ok });
+      } catch {
+        // The mutation-level onError explains the retry. Keep this card in place.
+        return;
+      } finally {
+        gradingRef.current = false;
+      }
+      if (!feedbackActiveRef.current) return;
       graded.current.add(item.key);
       if (ok) setGot((g) => g + 1);
     }
@@ -220,10 +291,18 @@ export function InterviewDrill({
               {enOnly ? explainToggle(item) : null}
               <ThemedText type="small" style={styles.hint}>{t('iv.sayAloud')}</ThemedText>
               <View style={styles.row}>
-                <Pressable style={[styles.gradeBtn, styles.again]} onPress={() => advance(false)}>
+                <Pressable
+                  style={[styles.gradeBtn, styles.again]}
+                  disabled={grade.isPending || feedbackPending}
+                  onPress={() => advance(false)}
+                >
                   <ThemedText style={styles.againText}>{t('iv.hard')}</ThemedText>
                 </Pressable>
-                <Pressable style={[styles.gradeBtn, styles.gotIt]} onPress={() => advance(true)}>
+                <Pressable
+                  style={[styles.gradeBtn, styles.gotIt]}
+                  disabled={grade.isPending || feedbackPending}
+                  onPress={() => advance(true)}
+                >
                   <ThemedText style={styles.primaryText}>{t('iv.saidIt')}</ThemedText>
                 </Pressable>
               </View>
@@ -271,10 +350,18 @@ export function InterviewDrill({
                   ) : null}
                   {enOnly ? explainToggle(item) : null}
                   <View style={styles.row}>
-                    <Pressable style={[styles.gradeBtn, styles.again]} onPress={() => advance(false)}>
+                    <Pressable
+                      style={[styles.gradeBtn, styles.again]}
+                      disabled={grade.isPending || feedbackPending}
+                      onPress={() => advance(false)}
+                    >
                       <ThemedText style={styles.againText}>{t('drill.again')}</ThemedText>
                     </Pressable>
-                    <Pressable style={[styles.gradeBtn, styles.gotIt]} onPress={() => advance(true)}>
+                    <Pressable
+                      style={[styles.gradeBtn, styles.gotIt]}
+                      disabled={grade.isPending || feedbackPending}
+                      onPress={() => advance(true)}
+                    >
                       <ThemedText style={styles.primaryText}>{t('drill.gotIt')}</ThemedText>
                     </Pressable>
                   </View>

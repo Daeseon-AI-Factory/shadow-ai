@@ -1,0 +1,57 @@
+---
+title: "모바일 저장 실패를 보이게 — 카드 진행 전에 서버 응답 기다리기"
+date: "2026-07-13"
+project: "shadow-ai"
+kind: "tech-retro"
+visibility: "public"
+language: "ko"
+summary: "clip·영상 삭제·review·drill grade의 조용한 mutation 실패를 localized Alert로 드러내고, grade는 저장 성공 뒤에만 다음 카드로 진행하도록 바꿨다."
+tags: ["expo", "react-query", "error-handling", "srs"]
+---
+
+## 문제
+
+모바일에서 중요한 저장 작업이 실패해도 사용자는 아무 설명을 받지 못했다. 특히 두 drill
+runner는 grade 요청을 보내기만 하고 바로 다음 카드로 넘어갔다. 네트워크가 끊기면 화면은
+학습이 기록된 것처럼 보이지만 서버에는 남지 않았을 수 있는 흐름이었다.
+
+## 바꾼 경계
+
+- clip 생성, 보관함 영상 삭제, review grade에 localized `Alert`와 Retry를 붙였다.
+- review Retry는 Alert가 열린 사이 queue가 바뀌어도 원래 `itemId`와 `quality`를 다시 쓴다.
+- DrillRunner와 InterviewDrill은 `mutateAsync`가 성공한 뒤에만 점수와 position을 바꾼다.
+  실패하면 같은 카드가 그대로 남아 재채점할 수 있다.
+- 짧은 Alert 재표시 대기 구간은 버튼도 disabled 상태로 유지하고, 화면 focus/route 세대가
+  바뀐 뒤 도착한 응답은 새 화면을 진행시키지 않는다.
+- 401은 공용 sign-out 경로가 이미 처리하므로 중복 Alert를 띄우지 않는다.
+- mutation은 자동 retry하지 않는다. grade와 clip 생성은 비멱등이라, 서버 적용 뒤 응답만
+  유실되면 자동 retry가 중복 상태를 만들 수 있기 때문이다.
+
+## 실패를 실제로 만들었다
+
+임시 localhost mock이 네 mutation endpoint에 HTTP 503을 반환하게 한 뒤 iPhone 17 Pro Max
+Simulator에서 다섯 UI 경로를 눌렀다. 접근성 출력에는 다음 제목과 버튼이 나타났다.
+
+```text
+Couldn't confirm the clip
+Couldn't confirm deletion
+Couldn't confirm progress
+Try again
+```
+
+review `1 / 1`, pattern drill `1 / 12`, interview drill `1 / 18`은 실패 후에도 같은 카드였다.
+Retry를 누른 review와 pattern drill은 새 POST를 보냈고 503 뒤 같은 Alert가 다시 나타났다. 첫 구현은
+Alert가 캡처한 옛 render의 `grade.isPending` 때문에 Retry가 조용히 반환했는데, ref lock을
+유일한 제출 guard로 두어 이 stale-closure 버그도 제거했다.
+
+## 검증 수준
+
+- 기능: 5개 mutation을 503으로 강제 실패해 메시지를 확인했고, review와 두 runner의 카드
+  유지 및 Retry 재요청을 확인했다.
+- build: `expo run:ios` 출력 `Build Succeeded`, `0 error(s), and 1 warning(s)`.
+- typecheck: `npx tsc --noEmit --pretty false` exit 0.
+- 제품/workflow: [unverified] 실제 불안정 네트워크에서 장기간 사용했을 때의 체감과,
+  서버 commit 뒤 응답만 유실되는 경우의 exactly-once 보장은 이번 클라이언트 범위로 확인할
+  수 없다.
+
+Commit: Track D L4 commit (immutable hash is in git history).

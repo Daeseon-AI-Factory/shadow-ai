@@ -1809,3 +1809,30 @@ sparring. No live billing webhook or paid external-model request was made, so de
 and provider behavior remain unverified.
 
 **Commit.** This commit; the immutable hash is recorded by Git history.
+
+---
+
+## 2026-07-13 — 모바일 mutation 실패가 조용히 사라지거나 grade 카드가 먼저 진행됨
+
+**Symptom.** clip 생성, 보관함 영상 삭제, review grade 실패에는 사용자 피드백이 없었다. 두 drill runner는 `practiceApi.grade`를 fire-and-forget으로 호출한 직후 카드를 진행시켜, 저장 실패 뒤에도 다음 카드로 넘어갔다. 로컬 mock API가 mutation에 HTTP 503을 반환하도록 한 Simulator 검증에서 기존 경로의 실패를 강제로 재현했다.
+
+**Cause (verified).** 세 화면의 `useMutation`에는 로컬 `onError`가 없었고, 두 runner는 `grade.mutate(...)` 뒤 곧바로 `graded.current.add(...)`와 position 변경을 실행했다. 공용 QueryClient는 401 sign-out만 처리한다. grade·review POST는 호출마다 서버 상태를 변경하며 idempotency key가 없어, transport 응답 유실을 자동 재시도하면 중복 반영 가능성이 있다.
+
+**Fix.** L4 mutation 다섯 곳에 localized `Alert`와 명시적 Retry를 추가했다. 401은 기존 전역 sign-out에 맡긴다. clip/delete/review는 ref lock으로 같은 tick 중복 제출을 막고, review Retry는 원래 `{ itemId, quality }`를 보존한다. 두 runner는 `mutateAsync` 성공 뒤에만 `graded`/score/position을 바꾸므로 실패 카드는 그대로 재큐된다. 즉시 실패한 Retry의 두 번째 Alert가 native dismiss 중 유실되지 않도록 Alert 표시만 350 ms 늦춘다. 그 짧은 구간은 synchronous ref와 disabled state로 잠그며, focus/route generation과 active guard가 blur/unmount 뒤의 timer·Retry·성공 UI 전환을 막는다. 응답 유실 시 서버 적용 여부는 클라이언트만으로 확정할 수 없어서 문구도 “결과를 확인하지 못함”으로 표현한다.
+
+**Verification.** iPhone 17 Pro Max Simulator와 로컬 503 mock에서 접근성 출력으로 다음을 확인했다.
+
+```text
+Couldn't confirm the clip
+Couldn't confirm deletion
+Couldn't confirm progress
+Try again
+```
+
+review는 실패 전후 `1 / 1`, DrillRunner는 `1 / 12`, InterviewDrill은 `1 / 18`에 머물렀다. review와 DrillRunner의 Retry는 두 번째 POST를 만들고 다시 `Couldn't confirm progress` Alert를 표시했다. 네이티브 build 출력은 `› Build Succeeded`, `› 0 error(s), and 1 warning(s)`였다. `npx tsc --noEmit --pretty false`도 exit 0으로 끝났다.
+
+**Known gap.** 서버가 mutation을 적용한 뒤 응답만 유실되면 클라이언트는 적용 여부를 확정할 수 없다. 이번 범위에서 자동 retry를 쓰지 않고 불확실성을 알리는 이유다. exactly-once가 필요하면 별도 backend idempotency가 필요하지만 Track D 금지 범위라 변경하지 않았다.
+
+**Commit.** Track D L4 commit (git history records the immutable hash).
+
+**Pattern.** 비멱등 mutation은 “실패했으니 자동 재시도”가 안전하지 않다. 성공 응답 전에는 UI state를 진행시키지 말고, transport ambiguity를 문구에 드러내며 사용자가 현재 상태를 확인한 뒤 명시적으로 재시도하게 한다.
