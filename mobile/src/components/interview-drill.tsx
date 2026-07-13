@@ -7,6 +7,7 @@ import { ApiError, localToday, practiceApi } from '@shadow-ai/core';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { SpokenCheck } from '@/components/spoken-check';
+import { pressableRipple, pressableStyle } from '@/hooks/use-theme';
 import { t } from '@/lib/i18n';
 
 const ALERT_REOPEN_DELAY_MS = 350;
@@ -143,7 +144,12 @@ export function InterviewDrill({
 
   const header = (
     <View style={styles.header}>
-      <Pressable hitSlop={12} onPress={onExit}>
+      <Pressable
+        style={pressableStyle(undefined)}
+        android_ripple={pressableRipple}
+        hitSlop={12}
+        onPress={onExit}
+      >
         <ThemedText style={styles.exit}>‹ {t('iv.exit')}</ThemedText>
       </Pressable>
       <ThemedText type="small">
@@ -166,7 +172,11 @@ export function InterviewDrill({
           <View style={styles.center}>
             <ThemedText type="subtitle">{t('drill.allCaughtUp')}</ThemedText>
             <ThemedText type="small">{t('drill.nothingDue')}</ThemedText>
-            <Pressable style={styles.linkBtn} onPress={onExit}>
+            <Pressable
+              style={pressableStyle(styles.linkBtn)}
+              android_ripple={pressableRipple}
+              onPress={onExit}
+            >
               <ThemedText style={styles.linkText}>{t('iv.backToModes')}</ThemedText>
             </Pressable>
           </View>
@@ -184,7 +194,11 @@ export function InterviewDrill({
             <ThemedText type="title">{t('drill.done')}</ThemedText>
             <ThemedText type="small">{t('drill.firstTry', { got, total: items.length })}</ThemedText>
             {streak !== null && <ThemedText type="small">{t('drill.streak', { n: streak })}</ThemedText>}
-            <Pressable style={styles.primaryBtn} onPress={onExit}>
+            <Pressable
+              style={pressableStyle(styles.primaryBtn)}
+              android_ripple={pressableRipple}
+              onPress={onExit}
+            >
               <ThemedText style={styles.primaryText}>{t('iv.backToModes')}</ThemedText>
             </Pressable>
           </View>
@@ -227,7 +241,11 @@ export function InterviewDrill({
   const explainToggle = (it: IvItem) =>
     it.detail || it.note || it.meaningKo ? (
       <View style={styles.gap}>
-        <Pressable style={styles.detailToggle} onPress={() => setShowDetail((s) => !s)}>
+        <Pressable
+          style={pressableStyle(styles.detailToggle)}
+          android_ripple={pressableRipple}
+          onPress={() => setShowDetail((s) => !s)}
+        >
           <ThemedText type="small" style={styles.detailToggleText}>
             💡 {t(showDetail ? 'iv.hideDetail' : 'iv.showDetail')}
           </ThemedText>
@@ -292,14 +310,16 @@ export function InterviewDrill({
               <ThemedText type="small" style={styles.hint}>{t('iv.sayAloud')}</ThemedText>
               <View style={styles.row}>
                 <Pressable
-                  style={[styles.gradeBtn, styles.again]}
+                  style={pressableStyle([styles.gradeBtn, styles.again])}
+                  android_ripple={pressableRipple}
                   disabled={grade.isPending || feedbackPending}
                   onPress={() => advance(false)}
                 >
                   <ThemedText style={styles.againText}>{t('iv.hard')}</ThemedText>
                 </Pressable>
                 <Pressable
-                  style={[styles.gradeBtn, styles.gotIt]}
+                  style={pressableStyle([styles.gradeBtn, styles.gotIt])}
+                  android_ripple={pressableRipple}
                   disabled={grade.isPending || feedbackPending}
                   onPress={() => advance(true)}
                 >
@@ -324,7 +344,11 @@ export function InterviewDrill({
               {!revealed ? (
                 <View style={styles.gap}>
                   <SpokenCheck question={item.answer} />
-                  <Pressable style={styles.primaryBtn} onPress={() => setRevealed(true)}>
+                  <Pressable
+                    style={pressableStyle(styles.primaryBtn)}
+                    android_ripple={pressableRipple}
+                    onPress={() => setRevealed(true)}
+                  >
                     <ThemedText style={styles.primaryText}>{t('drill.reveal')}</ThemedText>
                   </Pressable>
                 </View>
@@ -351,14 +375,16 @@ export function InterviewDrill({
                   {enOnly ? explainToggle(item) : null}
                   <View style={styles.row}>
                     <Pressable
-                      style={[styles.gradeBtn, styles.again]}
+                      style={pressableStyle([styles.gradeBtn, styles.again])}
+                      android_ripple={pressableRipple}
                       disabled={grade.isPending || feedbackPending}
                       onPress={() => advance(false)}
                     >
                       <ThemedText style={styles.againText}>{t('drill.again')}</ThemedText>
                     </Pressable>
                     <Pressable
-                      style={[styles.gradeBtn, styles.gotIt]}
+                      style={pressableStyle([styles.gradeBtn, styles.gotIt])}
+                      android_ripple={pressableRipple}
                       disabled={grade.isPending || feedbackPending}
                       onPress={() => advance(true)}
                     >

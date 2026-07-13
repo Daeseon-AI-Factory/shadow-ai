@@ -16,6 +16,7 @@ import { COLLOCATIONS, practiceApi, ApiError } from '@shadow-ai/core';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { pressableRipple, pressableStyle, useTheme } from '@/hooks/use-theme';
 import { useAuthStore } from '@/lib/auth-store';
 import { t } from '@/lib/i18n';
 
@@ -27,6 +28,7 @@ function pickIndex(): number {
 }
 
 export default function ComposeScreen() {
+  const theme = useTheme();
   const token = useAuthStore((s) => s.token);
   const [idx, setIdx] = useState(() => pickIndex());
   const [text, setText] = useState('');
@@ -66,9 +68,17 @@ export default function ComposeScreen() {
             </View>
 
             <TextInput
-              style={styles.input}
+              style={[
+                styles.input,
+                {
+                  color: theme.text,
+                  backgroundColor: theme.backgroundElement,
+                  borderColor: theme.border,
+                },
+              ]}
               placeholder={t('compose.inputPlaceholder')}
-              placeholderTextColor="#9ca3af"
+              placeholderTextColor={theme.textSecondary}
+              selectionColor={theme.primary}
               multiline
               value={text}
               onChangeText={setText}
@@ -91,7 +101,11 @@ export default function ComposeScreen() {
 
             <View style={styles.row}>
               <Pressable
-                style={[styles.primaryBtn, (!text.trim() || check.isPending) && styles.disabled]}
+                style={pressableStyle([
+                  styles.primaryBtn,
+                  (!text.trim() || check.isPending) && styles.disabled,
+                ])}
+                android_ripple={pressableRipple}
                 disabled={!text.trim() || check.isPending}
                 onPress={() => check.mutate()}
               >
@@ -101,7 +115,11 @@ export default function ComposeScreen() {
                   <ThemedText style={styles.primaryText}>{t('compose.check')}</ThemedText>
                 )}
               </Pressable>
-              <Pressable style={styles.secondaryBtn} onPress={next}>
+              <Pressable
+                style={pressableStyle(styles.secondaryBtn)}
+                android_ripple={pressableRipple}
+                onPress={next}
+              >
                 <ThemedText style={styles.secondaryText}>{t('compose.next')}</ThemedText>
               </Pressable>
             </View>
@@ -127,14 +145,11 @@ const styles = StyleSheet.create({
   target: { fontSize: 22, color: '#208AEF', fontFamily: 'Menlo' },
   input: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#9ca3af',
     borderRadius: 10,
     padding: 14,
     fontSize: 16,
     minHeight: 90,
     textAlignVertical: 'top',
-    color: '#111827',
-    backgroundColor: '#fff',
   },
   error: { color: '#dc2626' },
   fbBox: { borderRadius: 12, borderWidth: 1, padding: 14, gap: 6 },

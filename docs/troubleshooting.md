@@ -1288,3 +1288,21 @@ review는 실패 전후 `1 / 1`, DrillRunner는 `1 / 12`, InterviewDrill은 `1 /
 **Commit.** Track D L4 commit (git history records the immutable hash).
 
 **Pattern.** 비멱등 mutation은 “실패했으니 자동 재시도”가 안전하지 않다. 성공 응답 전에는 UI state를 진행시키지 말고, transport ambiguity를 문구에 드러내며 사용자가 현재 상태를 확인한 뒤 명시적으로 재시도하게 한다.
+
+---
+
+## 2026-07-13 — dark appearance에서 입력창만 밝고 Pressable 탭 반응이 보이지 않음
+
+**Symptom.** login/signup/settings/import/compose/videos의 지정 `TextInput` 12개는 밝은 text/background/border 값을 StyleSheet에 고정했고, Track D 허용 UI 파일의 `Pressable` 49개 소스 노드는 pressed style이나 Android ripple을 쓰지 않았다.
+
+**Cause (verified).** 여섯 입력 화면의 StyleSheet와 placeholder prop에서 `#111827`, `#fff`, `#9ca3af` 하드코딩을 확인했다. 설치된 React Native 0.85 타입과 구현은 `Pressable.style`의 `{ pressed }` callback 및 `android_ripple`을 지원하지만 해당 TSX 노드들이 이를 전달하지 않았다.
+
+**Fix.** 지정된 12개 입력은 `useTheme()`의 text/backgroundElement/border/textSecondary/primary를 text, surface, border, placeholder, selection 색에 적용했다. 공용 `pressableStyle`은 pressed opacity를 0.72로 만들고, `pressableRipple`은 Android ripple을 제공한다. 허용된 10개 UI 파일의 Pressable 49개에 둘을 모두 연결했다. 사용자 입력 목록 밖인 DrillRunner AI-check TextInput은 변경하지 않았다.
+
+**Verification.** TSX 정적 검사 출력은 `pressables=49 formTextInputs=12 issues=0`이었다. iPhone 17 Pro Max Simulator appearance를 `dark`로 전환해 login, signup, settings, import, compose, videos Clips 검색 입력이 어두운 surface로 렌더링되고 흰 입력 상자가 남지 않는 것을 화면에서 확인했다. login 링크에 `testOnly_pressed`를 임시 적용했을 때 opacity 감소가 렌더링됐고, prop은 검증 직후 제거했다. `npx tsc --noEmit --pretty false`는 exit 0이었다. Simulator는 검증 뒤 `light`로 복구했다.
+
+**Known gap.** Android ripple 실제 프레임, 실제 손가락 터치 체감, Windows 개발 호스트 실행은 [unverified]다.
+
+**Commit.** Track D L6 commit (git history records the immutable hash).
+
+**Pattern.** dark input은 text만이 아니라 surface/border/placeholder/selection을 한 theme source에서 가져와야 한다. 공통 pressed opacity를 기본으로 두고 Android ripple을 추가하면 플랫폼별 피드백을 한 helper 계약으로 유지할 수 있다.
