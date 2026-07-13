@@ -27,6 +27,8 @@ import com.tubeshadow.practice.api.dto.TransformCheckResponse;
 import com.tubeshadow.practice.api.dto.TransformGenerateRequest;
 import com.tubeshadow.practice.api.dto.SparringSessionRequest;
 import com.tubeshadow.practice.api.dto.SparringSessionResponse;
+import com.tubeshadow.practice.api.dto.SparringReportRequest;
+import com.tubeshadow.practice.api.dto.SparringReportResponse;
 import com.tubeshadow.practice.api.dto.TranscribeResponse;
 import com.tubeshadow.practice.application.CompositionService;
 import com.tubeshadow.practice.infrastructure.SparringClient;
@@ -200,6 +202,15 @@ public class PracticeController {
                     .toList();
         SparringClient.MintedSession minted = sparringClient.mintSession(request.mode(), targets);
         return ApiResponse.ok(new SparringSessionResponse(minted.clientSecret(), minted.model()));
+    }
+
+    @PostMapping("/sparring/report")
+    @Operation(summary = "종료된 음성 스파링의 학습 리포트 — 클라이언트가 전사한 사용자 발화만 분석")
+    public ApiResponse<SparringReportResponse> sparringReport(
+            @CurrentUser AuthenticatedUser user,
+            @Valid @RequestBody SparringReportRequest request) {
+        aiGate.assertAllowed(user.email());
+        return ApiResponse.ok(compositionService.sparringReport(request.userTurns(), request.targets()));
     }
 
     @GetMapping("/seeds")
