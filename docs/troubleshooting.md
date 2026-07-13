@@ -1261,3 +1261,48 @@ The SRS itself was fine: `drill-runner.tsx` already calls `practiceApi.grade(key
 
 <!-- override-trigger: 79e8f9a docs(log): realtime voice sparring v1 — WebView bridge decision (048c02e) [no-log] — false positive: this commit IS the log pair for feature commit 048c02e (troubleshooting entry + mdx narrative, both included in it); the keyword "decision" is in the log title, not an unlogged change -->
 <!-- skipped: dc1c646 chore(log): mark 79e8f9a as log-pair commit, trigger false positive [no-log] -->
+
+---
+
+## 2026-07-13 — 모바일 mutation 실패가 조용히 사라지거나 grade 카드가 먼저 진행됨
+
+**Symptom.** clip 생성, 보관함 영상 삭제, review grade 실패에는 사용자 피드백이 없었다. 두 drill runner는 `practiceApi.grade`를 fire-and-forget으로 호출한 직후 카드를 진행시켜, 저장 실패 뒤에도 다음 카드로 넘어갔다. 로컬 mock API가 mutation에 HTTP 503을 반환하도록 한 Simulator 검증에서 기존 경로의 실패를 강제로 재현했다.
+
+**Cause (verified).** 세 화면의 `useMutation`에는 로컬 `onError`가 없었고, 두 runner는 `grade.mutate(...)` 뒤 곧바로 `graded.current.add(...)`와 position 변경을 실행했다. 공용 QueryClient는 401 sign-out만 처리한다. grade·review POST는 호출마다 서버 상태를 변경하며 idempotency key가 없어, transport 응답 유실을 자동 재시도하면 중복 반영 가능성이 있다.
+
+**Fix.** L4 mutation 다섯 곳에 localized `Alert`와 명시적 Retry를 추가했다. 401은 기존 전역 sign-out에 맡긴다. clip/delete/review는 ref lock으로 같은 tick 중복 제출을 막고, review Retry는 원래 `{ itemId, quality }`를 보존한다. 두 runner는 `mutateAsync` 성공 뒤에만 `graded`/score/position을 바꾸므로 실패 카드는 그대로 재큐된다. 즉시 실패한 Retry의 두 번째 Alert가 native dismiss 중 유실되지 않도록 Alert 표시만 350 ms 늦춘다. 그 짧은 구간은 synchronous ref와 disabled state로 잠그며, focus/route generation과 active guard가 blur/unmount 뒤의 timer·Retry·성공 UI 전환을 막는다. 응답 유실 시 서버 적용 여부는 클라이언트만으로 확정할 수 없어서 문구도 “결과를 확인하지 못함”으로 표현한다.
+
+**Verification.** iPhone 17 Pro Max Simulator와 로컬 503 mock에서 접근성 출력으로 다음을 확인했다.
+
+```text
+Couldn't confirm the clip
+Couldn't confirm deletion
+Couldn't confirm progress
+Try again
+```
+
+review는 실패 전후 `1 / 1`, DrillRunner는 `1 / 12`, InterviewDrill은 `1 / 18`에 머물렀다. review와 DrillRunner의 Retry는 두 번째 POST를 만들고 다시 `Couldn't confirm progress` Alert를 표시했다. 네이티브 build 출력은 `› Build Succeeded`, `› 0 error(s), and 1 warning(s)`였다. `npx tsc --noEmit --pretty false`도 exit 0으로 끝났다.
+
+**Known gap.** 서버가 mutation을 적용한 뒤 응답만 유실되면 클라이언트는 적용 여부를 확정할 수 없다. 이번 범위에서 자동 retry를 쓰지 않고 불확실성을 알리는 이유다. exactly-once가 필요하면 별도 backend idempotency가 필요하지만 Track D 금지 범위라 변경하지 않았다.
+
+**Commit.** Track D L4 commit (git history records the immutable hash).
+
+**Pattern.** 비멱등 mutation은 “실패했으니 자동 재시도”가 안전하지 않다. 성공 응답 전에는 UI state를 진행시키지 말고, transport ambiguity를 문구에 드러내며 사용자가 현재 상태를 확인한 뒤 명시적으로 재시도하게 한다.
+
+---
+
+## 2026-07-13 — dark appearance에서 입력창만 밝고 Pressable 탭 반응이 보이지 않음
+
+**Symptom.** login/signup/settings/import/compose/videos의 지정 `TextInput` 12개는 밝은 text/background/border 값을 StyleSheet에 고정했고, Track D 허용 UI 파일의 `Pressable` 49개 소스 노드는 pressed style이나 Android ripple을 쓰지 않았다.
+
+**Cause (verified).** 여섯 입력 화면의 StyleSheet와 placeholder prop에서 `#111827`, `#fff`, `#9ca3af` 하드코딩을 확인했다. 설치된 React Native 0.85 타입과 구현은 `Pressable.style`의 `{ pressed }` callback 및 `android_ripple`을 지원하지만 해당 TSX 노드들이 이를 전달하지 않았다.
+
+**Fix.** 지정된 12개 입력은 `useTheme()`의 text/backgroundElement/border/textSecondary/primary를 text, surface, border, placeholder, selection 색에 적용했다. 공용 `pressableStyle`은 pressed opacity를 0.72로 만들고, `pressableRipple`은 Android ripple을 제공한다. 허용된 10개 UI 파일의 Pressable 49개에 둘을 모두 연결했다. 사용자 입력 목록 밖인 DrillRunner AI-check TextInput은 변경하지 않았다.
+
+**Verification.** TSX 정적 검사 출력은 `pressables=49 formTextInputs=12 issues=0`이었다. iPhone 17 Pro Max Simulator appearance를 `dark`로 전환해 login, signup, settings, import, compose, videos Clips 검색 입력이 어두운 surface로 렌더링되고 흰 입력 상자가 남지 않는 것을 화면에서 확인했다. login 링크에 `testOnly_pressed`를 임시 적용했을 때 opacity 감소가 렌더링됐고, prop은 검증 직후 제거했다. `npx tsc --noEmit --pretty false`는 exit 0이었다. Simulator는 검증 뒤 `light`로 복구했다.
+
+**Known gap.** Android ripple 실제 프레임, 실제 손가락 터치 체감, Windows 개발 호스트 실행은 [unverified]다.
+
+**Commit.** Track D L6 commit (git history records the immutable hash).
+
+**Pattern.** dark input은 text만이 아니라 surface/border/placeholder/selection을 한 theme source에서 가져와야 한다. 공통 pressed opacity를 기본으로 두고 Android ripple을 추가하면 플랫폼별 피드백을 한 helper 계약으로 유지할 수 있다.

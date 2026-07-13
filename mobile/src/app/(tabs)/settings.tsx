@@ -7,10 +7,12 @@ import { authApi, ApiError, reviewApi, practiceApi, clipsApi } from '@shadow-ai/
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { pressableRipple, pressableStyle, useTheme } from '@/hooks/use-theme';
 import { useAuthStore } from '@/lib/auth-store';
 import { t } from '@/lib/i18n';
 
 export default function SettingsScreen() {
+  const theme = useTheme();
   const token = useAuthStore((s) => s.token);
   const signOut = useAuthStore((s) => s.signOut);
   const qc = useQueryClient();
@@ -124,21 +126,30 @@ export default function SettingsScreen() {
           <View style={styles.box}>
             <ThemedText type="smallBold">{t('settings.displayName')}</ThemedText>
             <TextInput
-              style={styles.input}
+              style={[
+                styles.input,
+                {
+                  color: theme.text,
+                  backgroundColor: theme.backgroundElement,
+                  borderColor: theme.border,
+                },
+              ]}
               value={displayName}
               onChangeText={setDisplayName}
               maxLength={80}
               placeholder={t('settings.namePlaceholder')}
-              placeholderTextColor="#9ca3af"
+              placeholderTextColor={theme.textSecondary}
+              selectionColor={theme.primary}
             />
             <Pressable
-              style={[
+              style={pressableStyle([
                 styles.saveBtn,
                 (!displayName.trim() ||
                   profile.isPending ||
                   displayName.trim() === me.data?.displayName) &&
                   styles.disabled,
-              ]}
+              ])}
+              android_ripple={pressableRipple}
               disabled={
                 !displayName.trim() || profile.isPending || displayName.trim() === me.data?.displayName
               }
@@ -155,28 +166,45 @@ export default function SettingsScreen() {
           <View style={styles.box}>
             <ThemedText type="smallBold">{t('settings.changePassword')}</ThemedText>
             <TextInput
-              style={styles.input}
+              style={[
+                styles.input,
+                {
+                  color: theme.text,
+                  backgroundColor: theme.backgroundElement,
+                  borderColor: theme.border,
+                },
+              ]}
               placeholder={t('settings.currentPwPlaceholder')}
-              placeholderTextColor="#9ca3af"
+              placeholderTextColor={theme.textSecondary}
+              selectionColor={theme.primary}
               secureTextEntry
               autoComplete="current-password"
               value={currentPassword}
               onChangeText={setCurrentPassword}
             />
             <TextInput
-              style={styles.input}
+              style={[
+                styles.input,
+                {
+                  color: theme.text,
+                  backgroundColor: theme.backgroundElement,
+                  borderColor: theme.border,
+                },
+              ]}
               placeholder={t('settings.newPwPlaceholder')}
-              placeholderTextColor="#9ca3af"
+              placeholderTextColor={theme.textSecondary}
+              selectionColor={theme.primary}
               secureTextEntry
               autoComplete="new-password"
               value={newPassword}
               onChangeText={setNewPassword}
             />
             <Pressable
-              style={[
+              style={pressableStyle([
                 styles.saveBtn,
                 (!currentPassword || newPassword.length < 8 || changePw.isPending) && styles.disabled,
-              ]}
+              ])}
+              android_ripple={pressableRipple}
               disabled={!currentPassword || newPassword.length < 8 || changePw.isPending}
               onPress={() => changePw.mutate()}
             >
@@ -188,7 +216,11 @@ export default function SettingsScreen() {
             </Pressable>
           </View>
 
-          <Pressable style={styles.signOut} onPress={() => signOut()}>
+          <Pressable
+            style={pressableStyle(styles.signOut)}
+            android_ripple={pressableRipple}
+            onPress={() => signOut()}
+          >
             <ThemedText style={styles.signOutText}>{t('settings.signOut')}</ThemedText>
           </Pressable>
 
@@ -200,16 +232,28 @@ export default function SettingsScreen() {
               {t('settings.deleteDescription')}
             </ThemedText>
             <TextInput
-              style={styles.input}
+              style={[
+                styles.input,
+                {
+                  color: theme.text,
+                  backgroundColor: theme.backgroundElement,
+                  borderColor: theme.border,
+                },
+              ]}
               placeholder={t('settings.confirmPwPlaceholder')}
-              placeholderTextColor="#9ca3af"
+              placeholderTextColor={theme.textSecondary}
+              selectionColor={theme.primary}
               secureTextEntry
               autoComplete="current-password"
               value={password}
               onChangeText={setPassword}
             />
             <Pressable
-              style={[styles.deleteBtn, (!password || del.isPending) && styles.disabled]}
+              style={pressableStyle([
+                styles.deleteBtn,
+                (!password || del.isPending) && styles.disabled,
+              ])}
+              android_ripple={pressableRipple}
               disabled={!password || del.isPending}
               onPress={confirmDelete}
             >
@@ -222,10 +266,18 @@ export default function SettingsScreen() {
           </View>
 
           <View style={styles.legal}>
-            <Pressable onPress={() => Linking.openURL('https://mimi.daeseon.ai/en/terms')}>
+            <Pressable
+              style={pressableStyle(undefined)}
+              android_ripple={pressableRipple}
+              onPress={() => Linking.openURL('https://mimi.daeseon.ai/en/terms')}
+            >
               <ThemedText style={styles.link}>{t('settings.terms')}</ThemedText>
             </Pressable>
-            <Pressable onPress={() => Linking.openURL('https://mimi.daeseon.ai/en/privacy')}>
+            <Pressable
+              style={pressableStyle(undefined)}
+              android_ripple={pressableRipple}
+              onPress={() => Linking.openURL('https://mimi.daeseon.ai/en/privacy')}
+            >
               <ThemedText style={styles.link}>{t('settings.privacy')}</ThemedText>
             </Pressable>
           </View>
@@ -274,13 +326,10 @@ const styles = StyleSheet.create({
   dangerTitle: { color: '#dc2626' },
   input: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#9ca3af',
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 16,
-    color: '#111827',
-    backgroundColor: '#fff',
   },
   deleteBtn: { backgroundColor: '#dc2626', borderRadius: 10, paddingVertical: 14, alignItems: 'center' },
   disabled: { opacity: 0.5 },

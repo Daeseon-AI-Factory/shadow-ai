@@ -1,9 +1,9 @@
-import { useCallback, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useCallback, useRef, useState } from 'react';
+import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Redirect, router, useFocusEffect } from 'expo-router';
-import { useMutation, useQuery } from '@tanstack/react-query';
-import { reviewApi, analysisApi, REVIEW_QUALITY, type ReviewQueueItem } from '@shadow-ai/core';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ApiError, reviewApi, analysisApi, REVIEW_QUALITY, type ReviewQueueItem } from '@shadow-ai/core';
 
 import { ChunkLadder } from '@/components/chunk-ladder';
 import { ErrorState } from '@/components/error-state';
@@ -11,6 +11,7 @@ import { SkeletonCards } from '@/components/skeleton';
 import { haptic } from '@/lib/haptics';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { pressableRipple, pressableStyle } from '@/hooks/use-theme';
 import { useAuthStore } from '@/lib/auth-store';
 import { t } from '@/lib/i18n';
 
@@ -20,11 +21,20 @@ const GRADES = [
   { label: 'Good', labelKey: 'review.good', quality: REVIEW_QUALITY.GOOD, color: '#208AEF' },
   { label: 'Easy', labelKey: 'review.easy', quality: REVIEW_QUALITY.EASY, color: '#10b981' },
 ];
+const ALERT_REOPEN_DELAY_MS = 350;
+type GradeAttempt = { itemId: string; quality: number; focusGeneration: number };
 
 export default function ReviewScreen() {
   const token = useAuthStore((s) => s.token);
+  const qc = useQueryClient();
   const [pos, setPos] = useState(0);
   const [revealed, setRevealed] = useState(false);
+  const [feedbackPending, setFeedbackPending] = useState(false);
+  const respondingRef = useRef(false);
+  const feedbackActiveRef = useRef(false);
+  const focusGenerationRef = useRef(0);
+  const feedbackPendingRef = useRef(false);
+  const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const queue = useQuery({
     queryKey: ['review', 'queue'],
@@ -36,9 +46,20 @@ export default function ReviewScreen() {
   // finished session ("Review done") even with new cards due. Reset + refetch on every focus.
   useFocusEffect(
     useCallback(() => {
+      focusGenerationRef.current += 1;
+      feedbackActiveRef.current = true;
+      feedbackPendingRef.current = false;
+      setFeedbackPending(false);
       setPos(0);
       setRevealed(false);
       queue.refetch();
+      return () => {
+        feedbackActiveRef.current = false;
+        focusGenerationRef.current += 1;
+        if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+        feedbackTimerRef.current = null;
+        feedbackPendingRef.current = false;
+      };
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []),
   );
@@ -52,13 +73,82 @@ export default function ReviewScreen() {
     enabled: !!item,
   });
 
+  const releaseGradeFeedback = () => {
+    if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+    feedbackTimerRef.current = null;
+    feedbackPendingRef.current = false;
+    if (feedbackActiveRef.current) setFeedbackPending(false);
+  };
+
+  const queueGradeFeedback = (variables: GradeAttempt) => {
+    if (
+      !feedbackActiveRef.current ||
+      variables.focusGeneration !== focusGenerationRef.current
+    ) return;
+    feedbackPendingRef.current = true;
+    setFeedbackPending(true);
+    if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+    const feedbackTimer = setTimeout(() => {
+      if (feedbackTimerRef.current !== feedbackTimer) return;
+      feedbackTimerRef.current = null;
+      if (
+        !feedbackActiveRef.current ||
+        variables.focusGeneration !== focusGenerationRef.current
+      ) return;
+      Alert.alert(
+        t('feedback.gradeFailedTitle'),
+        t('feedback.gradeFailedMessage'),
+        [
+          { text: t('common.cancel'), style: 'cancel', onPress: releaseGradeFeedback },
+          {
+            text: t('common.retry'),
+            onPress: () => {
+              releaseGradeFeedback();
+              if (!feedbackActiveRef.current) return;
+              submitGrade(variables);
+            },
+          },
+        ],
+        { cancelable: true, onDismiss: releaseGradeFeedback },
+      );
+    }, ALERT_REOPEN_DELAY_MS);
+    feedbackTimerRef.current = feedbackTimer;
+  };
+
   const respond = useMutation({
-    mutationFn: (quality: number) => reviewApi.respond(item!.id, quality),
-    onSuccess: () => {
+    mutationFn: ({ itemId, quality }: GradeAttempt) =>
+      reviewApi.respond(itemId, quality),
+    onSuccess: (_data, variables) => {
+      if (
+        !feedbackActiveRef.current ||
+        variables.focusGeneration !== focusGenerationRef.current
+      ) {
+        qc.invalidateQueries({ queryKey: ['review', 'queue'] });
+        return;
+      }
+      (pos >= (queue.data?.length ?? 0) - 1 ? haptic.success : haptic.tap)();
       setRevealed(false);
       setPos((p) => p + 1);
     },
+    onError: (error, variables) => {
+      if (error instanceof ApiError && error.status === 401) return;
+      queueGradeFeedback(variables);
+    },
+    onSettled: () => {
+      respondingRef.current = false;
+    },
   });
+
+  const submitGrade = (variables: GradeAttempt) => {
+    if (
+      !feedbackActiveRef.current ||
+      variables.focusGeneration !== focusGenerationRef.current ||
+      respondingRef.current ||
+      feedbackPendingRef.current
+    ) return;
+    respondingRef.current = true;
+    respond.mutate(variables);
+  };
 
   if (!token) return <Redirect href="/login" />;
   if (queue.isPending) {
@@ -92,7 +182,8 @@ export default function ReviewScreen() {
             {finished ? t('review.reviewedCount', { n: total }) : t('review.nothingDueSub')}
           </ThemedText>
           <Pressable
-            style={styles.primaryBtn}
+            style={pressableStyle(styles.primaryBtn)}
+            android_ripple={pressableRipple}
             onPress={() => router.replace('/')}
             accessibilityRole="button"
             accessibilityLabel={t('review.home')}
@@ -100,7 +191,8 @@ export default function ReviewScreen() {
             <ThemedText style={styles.primaryText}>{t('review.home')}</ThemedText>
           </Pressable>
           <Pressable
-            style={styles.doneSecondary}
+            style={pressableStyle(styles.doneSecondary)}
+            android_ripple={pressableRipple}
             onPress={() => router.replace('/practice')}
             accessibilityRole="button"
             accessibilityLabel={t('review.morePractice')}
@@ -112,7 +204,8 @@ export default function ReviewScreen() {
     );
   }
 
-  const clip = item!.clip;
+  const currentItem = item!;
+  const clip = currentItem.clip;
   const koPrompt = analysis.data?.primaryTranslation;
 
   return (
@@ -139,7 +232,8 @@ export default function ReviewScreen() {
 
           {!revealed ? (
             <Pressable
-              style={styles.primaryBtn}
+              style={pressableStyle(styles.primaryBtn)}
+              android_ripple={pressableRipple}
               onPress={() => setRevealed(true)}
               accessibilityRole="button"
               accessibilityLabel={t('review.reveal')}
@@ -154,7 +248,8 @@ export default function ReviewScreen() {
                 </ThemedText>
               </View>
               <Pressable
-                style={styles.linkBtn}
+                style={pressableStyle(styles.linkBtn)}
+                android_ripple={pressableRipple}
                 onPress={() => router.push(`/player/${clip.id}`)}
                 accessibilityRole="button"
                 accessibilityLabel={t('review.openClip')}
@@ -166,11 +261,15 @@ export default function ReviewScreen() {
                 {GRADES.map((g) => (
                   <Pressable
                     key={g.label}
-                    style={[styles.gradeBtn, { backgroundColor: g.color }]}
-                    disabled={respond.isPending}
+                    style={pressableStyle([styles.gradeBtn, { backgroundColor: g.color }])}
+                    android_ripple={pressableRipple}
+                    disabled={respond.isPending || feedbackPending}
                     onPress={() => {
-                      (pos >= total - 1 ? haptic.success : haptic.tap)();
-                      respond.mutate(g.quality);
+                      submitGrade({
+                        itemId: currentItem.id,
+                        quality: g.quality,
+                        focusGeneration: focusGenerationRef.current,
+                      });
                     }}
                     accessibilityRole="button"
                     accessibilityLabel={t(g.labelKey)}

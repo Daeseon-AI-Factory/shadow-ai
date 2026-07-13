@@ -19,6 +19,7 @@ import {
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { pressableRipple, pressableStyle, useTheme } from '@/hooks/use-theme';
 import { useAuthStore } from '@/lib/auth-store';
 import { t } from '@/lib/i18n';
 import {
@@ -27,6 +28,7 @@ import {
 } from '@/lib/youtube-transcript-webview';
 
 export default function ImportScreen() {
+  const theme = useTheme();
   const token = useAuthStore((s) => s.token);
   const qc = useQueryClient();
   // Discover deep-links here with a ?url= to prefill (tap a curated video to import it).
@@ -106,9 +108,17 @@ export default function ImportScreen() {
             <ThemedText type="small">{t('import.subtitle')}</ThemedText>
 
             <TextInput
-              style={styles.input}
+              style={[
+                styles.input,
+                {
+                  color: theme.text,
+                  backgroundColor: theme.backgroundElement,
+                  borderColor: theme.border,
+                },
+              ]}
               placeholder={t('import.urlPlaceholder')}
-              placeholderTextColor="#9ca3af"
+              placeholderTextColor={theme.textSecondary}
+              selectionColor={theme.primary}
               autoCapitalize="none"
               autoCorrect={false}
               keyboardType="url"
@@ -124,7 +134,11 @@ export default function ImportScreen() {
             )}
 
             <Pressable
-              style={[styles.primaryBtn, (!url.trim() || isImporting) && styles.disabled]}
+              style={pressableStyle([
+                styles.primaryBtn,
+                (!url.trim() || isImporting) && styles.disabled,
+              ])}
+              android_ripple={pressableRipple}
               disabled={!url.trim() || isImporting}
               onPress={startImport}
             >
@@ -156,13 +170,10 @@ const styles = StyleSheet.create({
   empty: { textAlign: 'center', marginTop: 24 },
   input: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#9ca3af',
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 16,
-    color: '#111827',
-    backgroundColor: '#fff',
   },
   error: { color: '#dc2626' },
   primaryBtn: {
