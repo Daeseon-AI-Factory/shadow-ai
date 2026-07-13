@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Dimensions,
   FlatList,
   Pressable,
@@ -12,7 +13,7 @@ import { Redirect, router, useLocalSearchParams } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import YoutubePlayer, { type YoutubeIframeRef } from 'react-native-youtube-iframe';
-import { clipsApi, videosApi, type TranscriptSegment } from '@shadow-ai/core';
+import { ApiError, clipsApi, videosApi, type TranscriptSegment } from '@shadow-ai/core';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -21,10 +22,23 @@ import { LineRecorder } from '@/components/line-recorder';
 import { useAuthStore } from '@/lib/auth-store';
 import { t } from '@/lib/i18n';
 
+const ALERT_REOPEN_DELAY_MS = 350;
+type ClipAttempt = {
+  videoId: string;
+  segment: TranscriptSegment;
+  routeGeneration: number;
+};
+
 export default function VideoDetailScreen() {
   const token = useAuthStore((s) => s.token);
   const { id } = useLocalSearchParams<{ id: string }>();
   const playerRef = useRef<YoutubeIframeRef>(null);
+  const makingClipRef = useRef(false);
+  const feedbackActiveRef = useRef(true);
+  const routeGenerationRef = useRef(0);
+  const feedbackPendingRef = useRef(false);
+  const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [feedbackPending, setFeedbackPending] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [currentMs, setCurrentMs] = useState(0);
   const [mode, setMode] = useState<'sentences' | 'full'>('sentences');
@@ -59,18 +73,97 @@ export default function VideoDetailScreen() {
     enabled: !!token && !!id,
   });
 
+  useEffect(() => {
+    routeGenerationRef.current += 1;
+    feedbackActiveRef.current = true;
+    feedbackPendingRef.current = false;
+    setFeedbackPending(false);
+    return () => {
+      feedbackActiveRef.current = false;
+      routeGenerationRef.current += 1;
+      if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+      feedbackTimerRef.current = null;
+      feedbackPendingRef.current = false;
+    };
+  }, [id]);
+
+  const releaseClipFeedback = () => {
+    if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+    feedbackTimerRef.current = null;
+    feedbackPendingRef.current = false;
+    if (feedbackActiveRef.current) setFeedbackPending(false);
+  };
+
+  const queueClipFeedback = (variables: ClipAttempt) => {
+    if (
+      !feedbackActiveRef.current ||
+      variables.routeGeneration !== routeGenerationRef.current
+    ) return;
+    feedbackPendingRef.current = true;
+    setFeedbackPending(true);
+    if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+    const feedbackTimer = setTimeout(() => {
+      if (feedbackTimerRef.current !== feedbackTimer) return;
+      feedbackTimerRef.current = null;
+      if (
+        !feedbackActiveRef.current ||
+        variables.routeGeneration !== routeGenerationRef.current
+      ) return;
+      Alert.alert(
+        t('feedback.clipCreateFailedTitle'),
+        t('feedback.clipCreateFailedMessage'),
+        [
+          { text: t('common.cancel'), style: 'cancel', onPress: releaseClipFeedback },
+          {
+            text: t('common.retry'),
+            onPress: () => {
+              releaseClipFeedback();
+              if (!feedbackActiveRef.current) return;
+              submitClip(variables);
+            },
+          },
+        ],
+        { cancelable: true, onDismiss: releaseClipFeedback },
+      );
+    }, ALERT_REOPEN_DELAY_MS);
+    feedbackTimerRef.current = feedbackTimer;
+  };
+
   // Make a one-line clip from a transcript line, then open the clip player (loop + record + AI).
   const makeClip = useMutation({
-    mutationFn: (seg: TranscriptSegment) =>
+    mutationFn: ({ videoId, segment }: ClipAttempt) =>
       clipsApi.create({
-        videoId: id,
-        startMs: seg.startMs,
-        endMs: seg.endMs,
-        name: seg.text.slice(0, 40),
+        videoId,
+        startMs: segment.startMs,
+        endMs: segment.endMs,
+        name: segment.text.slice(0, 40),
         tags: [],
       }),
-    onSuccess: (clip) => router.push(`/player/${clip.id}`),
+    onSuccess: (clip, variables) => {
+      if (
+        feedbackActiveRef.current &&
+        variables.routeGeneration === routeGenerationRef.current
+      ) router.push(`/player/${clip.id}`);
+    },
+    onError: (error, variables) => {
+      if (error instanceof ApiError && error.status === 401) return;
+      queueClipFeedback(variables);
+    },
+    onSettled: () => {
+      makingClipRef.current = false;
+    },
   });
+
+  const submitClip = (variables: ClipAttempt) => {
+    if (
+      !feedbackActiveRef.current ||
+      variables.routeGeneration !== routeGenerationRef.current ||
+      makingClipRef.current ||
+      feedbackPendingRef.current
+    ) return;
+    makingClipRef.current = true;
+    makeClip.mutate(variables);
+  };
 
   const lines: TranscriptSegment[] = useMemo(() => {
     const v = video.data;
@@ -412,8 +505,12 @@ export default function VideoDetailScreen() {
                 {focused && (
                   <Pressable
                     style={styles.clipBtn}
-                    disabled={makeClip.isPending}
-                    onPress={() => makeClip.mutate(item)}
+                    disabled={makeClip.isPending || feedbackPending}
+                    onPress={() => submitClip({
+                      videoId: id,
+                      segment: item,
+                      routeGeneration: routeGenerationRef.current,
+                    })}
                     accessibilityRole="button"
                     accessibilityLabel={t('video.clipLine')}
                   >
