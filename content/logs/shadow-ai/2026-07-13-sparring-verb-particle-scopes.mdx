@@ -1,0 +1,43 @@
+---
+title: "기본 동사 스파링을 한 축으로 — 동사별·파티클별 하위 범위"
+date: "2026-07-13"
+project: "shadow-ai"
+kind: "update"
+visibility: "public"
+language: "ko"
+summary: "기본 동사 스파링에서 put/take/get 같은 동사 그룹이나 up/off/out 같은 파티클 family 하나만 골라 대화 타깃을 만들 수 있게 했다. 선택 범위 밖 카드는 보충하지 않는다."
+tags: ["sparring", "verbs", "particles", "expo"]
+---
+
+## 문제
+
+기본 동사 팩에는 1,956개 카드가 있지만 스파링은 팩 전체만 하나의 주제로 취급했다.
+“오늘은 take 표현만”, “off 감각만”처럼 한 묶음을 입으로 꺼내는 세션을 만들 수 없었다.
+
+## 이미 있던 축
+
+새 분류를 추측해 만들 필요는 없었다. `VERB_PACK`에는 103개 동사 그룹이 있고,
+`PARTICLE_FAMILIES`에는 신뢰 가능한 25개 adverb-particle family가 실제 SRS 카드키로
+연결돼 있었다. 검사 결과 family가 가리키는 누락 카드키는 0개였다. 별도 `PHRASAL_500`은
+동사/파티클 메타데이터가 없으므로 문자열을 잘라 억지 분류하지 않았다.
+
+## 구현
+
+기본 동사 토픽을 선택하면 **동사별 / 파티클별** 축이 나타난다. 동사 축은 put/take/get
+등의 `VERB_PACK` 그룹을, 파티클 축은 up/off/out 등의 `PARTICLE_FAMILIES`를 가로 칩으로
+보여 준다. 선택한 그룹으로 `poolFor`를 먼저 좁힌 다음 기존 due 우선·fresh 보충 로직을
+적용한다. 따라서 타깃이 부족해도 다른 그룹에서 몰래 채우지 않는다.
+
+## 검증 범위
+
+실제 데이터로 get/take/put의 모든 키가 선택한 verb prefix 안에 있고, out/up/off의 모든
+키가 선택한 family 집합 안에 있는지 assertion으로 확인했다.
+
+```text
+F4 scope checks: get/take/put and out/up/off contain only selected-group keys
+```
+
+`cd mobile && npx tsc --noEmit`은 출력 없이 exit 0이었다. 실제 iOS 화면에서 축과 그룹을
+눌러 타깃이 바뀌는 흐름은 최종 개발 빌드 검증에 남겨 뒀다.
+
+구현 커밋: `dc1fd68`.

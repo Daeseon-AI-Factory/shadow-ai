@@ -1452,3 +1452,31 @@ $ cd mobile && npx tsc --noEmit
 ```
 
 **Commit.** `90d9206`
+
+---
+
+## 2026-07-13 — 기본 동사 스파링이 1,956개 풀 전체에서만 타깃을 고름
+
+**Symptom (코드 감사).** 기존 `poolFor`는 상위 토픽만 받아 기본 동사 전체 풀을 반환했다. `put`, `take`, `get` 또는 `up`, `off`, `out`처럼 한 축으로 좁힐 입력이 없었다.
+
+```tsx
+const poolFor = (topic: TopicKey): Candidate[] =>
+  (TOPICS.find((tp) => tp.key === topic) ?? TOPICS[0]).pool();
+```
+
+**Cause (검증됨).** 동사 그룹은 `VERB_PACK`, 파티클별 카드키는 `PARTICLE_FAMILIES`에 이미 있었지만 스파링 풀과 선택 UI가 이 분류를 사용하지 않았다. 데이터 검사 결과 동사 그룹 103개, 파티클 family 25개였고 family의 누락 카드키는 0개였다.
+
+**Fix.** `mobile/src/app/sparring.tsx`의 기본 동사 토픽에 동사별/파티클별 축과 가로 그룹 picker를 추가했다. `poolFor(topic, scopeAxis, scopePick)`은 선택한 verb ID 또는 `PARTICLE_FAMILIES` 카드키만 반환한다. 이후 due/known/fresh 보충도 이 scoped 배열 안에서만 수행하므로 다른 그룹 타깃을 섞지 않는다. 영어/한국어 축 문구는 `mobile/src/lib/i18n-messages.ts`에 추가했다.
+
+**검증 (함수 수준: 데이터/정적/타입).**
+
+```text
+F4 data checks: verbGroups=103 particleFamilies=25 missingKeys=0 get=42 take=31 put=25
+F4 scope checks: get/take/put and out/up/off contain only selected-group keys
+$ cd mobile && npx tsc --noEmit
+(no stdout; exit 0)
+```
+
+실제 iOS picker 조작은 아직 실행하지 않았다.
+
+**Commit.** `dc1fd68`
