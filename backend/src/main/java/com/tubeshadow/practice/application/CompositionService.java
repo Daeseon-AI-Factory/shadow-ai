@@ -124,12 +124,15 @@ public class CompositionService {
      * Next interviewer question in the mock-interview loop — an opener on an empty history,
      * otherwise a follow-up digging into the candidate's last answer. One short question per call.
      */
-    public MockNextResponse mockNext(List<MockInterviewPrompt.Turn> history, long seed) {
+    public MockNextResponse mockNext(
+            List<MockInterviewPrompt.Turn> history, long seed, String jobDescription) {
         if (!ai.isConfigured()) {
             throw new BusinessException(HttpStatus.SERVICE_UNAVAILABLE, "AI_NOT_CONFIGURED",
                     "AI가 설정되지 않았습니다 (API 키 필요)");
         }
-        String raw = ai.complete(MockInterviewPrompt.SYSTEM, MockInterviewPrompt.userMessage(history, seed));
+        String raw = ai.complete(
+                MockInterviewPrompt.SYSTEM,
+                MockInterviewPrompt.userMessage(history, seed, jobDescription));
         try {
             JsonNode n = objectMapper.readTree(stripFence(raw));
             String q = n.path("question").asText("");

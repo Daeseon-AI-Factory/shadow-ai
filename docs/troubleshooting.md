@@ -1700,8 +1700,6 @@ BUILD SUCCESSFUL in 36s
 
 **Commit.** This commit; the immutable hash is recorded by Git history.
 
----
-
 ## 2026-07-13 — F1: mint-only sparring had no server path for an end-of-session report
 
 **Gap (verified).** The F5 commit had no backend route containing `sparring/report`:
@@ -1736,5 +1734,43 @@ actually reached `live` and then ended. `connecting` or aborted sessions must se
 nor grades. For each returned missed target, exclude keys already in the screen's local `hits` set
 (they were already graded `correct:true` live), then call the existing SRS grade endpoint with
 `correct:false`. This avoids promoting and immediately resetting the same card in one session.
+
+**Commit.** This commit; the immutable hash is recorded by Git history.
+
+---
+
+## 2026-07-13 — F2: mock interviews could not receive a job description
+
+**Gap (verified).** The F1 commit had no backend `jobDescription` field or call-chain reference:
+
+```text
+git grep -n 'jobDescription' 6e14456 -- backend
+# no matches; exit 1
+```
+
+`MockNextRequest` carried only history and seed, so `PracticeController`, `CompositionService`, and
+`MockInterviewPrompt.userMessage` had no role-specific data to use.
+
+**Fix.** Added optional `jobDescription` (maximum 12,000 characters) and threaded it through the
+existing call chain. A nonblank JD is prepended to the user message as delimited untrusted role data;
+the fixed `MockInterviewPrompt.SYSTEM` and strict `{"question": ...}` response contract are unchanged.
+The reserved boundary strings are removed from JD data, null history elements return 400, and a
+null/blank JD produces the previous prompt text exactly.
+
+**Verification.** `cd backend && ./gradlew test --rerun-tasks`:
+
+```text
+BUILD SUCCESSFUL in 2m 25s
+4 actionable tasks: 4 executed
+```
+
+The generated JUnit XML contained no non-zero `failures` or `errors` attribute (`rg` returned no
+matches, exit 1). Tests verify request validation, unchanged no-JD text, JD threading, sentinel
+sanitization, and the existing question parser. They use a mocked provider; whether a live model
+actually produces stack-specific questions is unverified.
+
+**Client follow-up (not implemented in this backend commit).** Add an optional JD paste field on the
+mock-interview screen and include the same `jobDescription` value on every `/interview/mock` request
+in the session, not only the opener.
 
 **Commit.** This commit; the immutable hash is recorded by Git history.
