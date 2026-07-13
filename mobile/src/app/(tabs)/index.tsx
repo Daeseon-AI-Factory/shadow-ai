@@ -7,6 +7,7 @@ import { authApi, clipsApi, reviewApi } from '@shadow-ai/core';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { ErrorState } from '@/components/error-state';
 import { useTheme } from '@/hooks/use-theme';
 import { useAuthStore } from '@/lib/auth-store';
 import { useLastClip } from '@/lib/last-clip';
@@ -26,13 +27,27 @@ export default function TodayScreen() {
   const hydrated = useAuthStore((s) => s.hydrated);
   const theme = useTheme();
 
-  const me = useQuery({ queryKey: ['me'], queryFn: () => authApi.me(), enabled: !!token });
-  const streak = useQuery({ queryKey: ['streak'], queryFn: () => reviewApi.streak(), enabled: !!token });
+  const me = useQuery({
+    queryKey: ['me'],
+    queryFn: () => authApi.me(),
+    enabled: !!token,
+    // A valid cold start seeds this cache during silent token validation.
+    staleTime: 60_000,
+    // L1 already bounds each request; show the explicit retry state after one failed attempt.
+    retry: false,
+  });
+  const streak = useQuery({
+    queryKey: ['streak'],
+    queryFn: () => reviewApi.streak(),
+    enabled: !!token,
+    retry: false,
+  });
   // size:1 with the default "newest" sort → the most recent clip, used as the "continue" target.
   const recent = useQuery({
     queryKey: ['clips', 'recent'],
     queryFn: () => clipsApi.list({ size: 1 }),
     enabled: !!token,
+    retry: false,
   });
   const lastClip = useLastClip();
 
@@ -44,6 +59,20 @@ export default function TodayScreen() {
     );
   }
   if (!token) return <Redirect href="/login" />;
+
+  if (me.isError || streak.isError || recent.isError) {
+    return (
+      <ThemedView style={styles.flex}>
+        <SafeAreaView style={styles.flex} edges={['top']}>
+          <ErrorState
+            onRetry={() => {
+              void Promise.all([me.refetch(), streak.refetch(), recent.refetch()]);
+            }}
+          />
+        </SafeAreaView>
+      </ThemedView>
+    );
+  }
 
   const due = streak.data?.dueToday ?? 0;
   const streakDays = streak.data?.streakDays ?? 0;
