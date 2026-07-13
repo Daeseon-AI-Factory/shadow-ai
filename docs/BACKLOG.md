@@ -4,6 +4,36 @@
 > **IDs (L1–L7, F1–F6, O1–O8, bug rows) are stable handles — assign work to Codex by ID.**
 > Effort: S ≈ hours, M ≈ a day, L ≈ multi-day. Ship the 🔴 tier first.
 
+## Parallelization plan (run these 4 tracks at once — each on its own branch)
+
+Tracks own **disjoint file sets**, so 4 Codex tasks can run in parallel with clean merges. Inside a track, do items **in order** (dependencies). Paste one block per Codex task.
+
+**Merge order:** land Track A's L1 first (L2/others depend on the timeout); other tracks touch different files so order is free. `docs/i18n-messages.ts` is a shared append point (Tracks A/B/D add strings) — resolve tiny append conflicts at merge.
+
+<details><summary><b>Track A — Auth &amp; reliability</b> · branch <code>codex/track-a</code> · items L1 → L2 → L7</summary>
+
+> Read `docs/BACKLOG.md`. Work **only on Track A**: implement **L1, then L2, then L7** in that order. Touch **only** these files: `packages/core/src/api/client.ts`, `mobile/src/app/_layout.tsx`, `mobile/src/lib/auth-store.ts`, `mobile/src/lib/secure-token.ts`, `mobile/src/lib/query-client.ts`, `mobile/src/app/(tabs)/index.tsx`, `mobile/src/app/onboarding.tsx`, and i18n strings. **Do NOT touch `sparring.tsx`, `PracticeController`, or the mutation screens — other tracks own them.** Follow the "Ground rules". After each item run its **Verify** steps. Commit on branch `codex/track-a` and add the `docs/troubleshooting.md` + `content/logs/shadow-ai/*.mdx` entries per `CLAUDE.md`.
+</details>
+
+<details><summary><b>Track B — Sparring</b> · branch <code>codex/track-b</code> · items L5 → F3 → F4 (→ L3)</summary>
+
+> Read `docs/BACKLOG.md`. Work **only on Track B**: implement **L5, then F3, then F4**, then **L3** (403 UX for the sparring/compose paths) in that order. Touch **only**: `mobile/src/app/sparring.tsx`, `packages/core/src/practice-srs.ts` (F3 helper), the API-error shape in `packages/core/src/api/client.ts` **for L3's error-code detection only** (coordinate: Track A owns the rest of that file — keep your change to an exported error type/constant), and i18n strings. **Do NOT touch `_layout.tsx`, backend, or mutation screens.** Follow "Ground rules", run each **Verify**, branch `codex/track-b`, log per `CLAUDE.md`.
+</details>
+
+<details><summary><b>Track C — Backend</b> · branch <code>codex/track-c</code> · items F5, then F1 → F2 → F6</summary>
+
+> Read `docs/BACKLOG.md`. Work **only on Track C** (backend): do **F5** first (isolated, `ClaudeClient`), then **F1 → F2 → F6** in order (all touch `PracticeController` so keep them sequential). Touch **only** `backend/**` (`PracticeController`, `CompositionService`, `practice/prompt/*`, `AiGate`, `SparringClient`, `ClaudeClient`, DTOs) plus the small client calls each feature needs in `mobile/src/app/sparring.tsx`/interview screens **only if unavoidable — prefer leaving client wiring as a follow-up note**. **DB migrations need explicit owner approval — do not create one without it (F6 credit ledger is out of scope; boolean plan-gating only).** Follow "Ground rules", run each **Verify** (`./gradlew test`), branch `codex/track-c`, log per `CLAUDE.md`.
+</details>
+
+<details><summary><b>Track D — Action feedback &amp; theming</b> · branch <code>codex/track-d</code> · items L4 → L6</summary>
+
+> Read `docs/BACKLOG.md`. Work **only on Track D**: implement **L4, then L6**. Touch **only**: `mobile/src/app/video/[id].tsx`, `mobile/src/app/(tabs)/review.tsx`, `mobile/src/app/(tabs)/videos.tsx`, `mobile/src/components/drill-runner.tsx`, `mobile/src/components/interview-drill.tsx`, the form inputs in `login/signup/settings/import/compose/videos`, the shared theme hook, and i18n strings. **Do NOT touch `sparring.tsx`, `_layout.tsx`, `client.ts`, or backend.** Follow "Ground rules", run each **Verify**, branch `codex/track-d`, log per `CLAUDE.md`.
+</details>
+
+**Owner coordination:** while you (or Claude) are editing a track's files, don't also assign that track to Codex — same-file edits collide with a running agent too. Split by track: "this track = Codex, that track = me".
+
+---
+
 ## Ground rules for the implementer
 
 - **Stack:** backend = Java 21 / Spring Boot 3, pkg `com.tubeshadow`; mobile = Expo v56 / React Native (read the versioned Expo docs first, per `mobile/AGENTS.md`); shared logic in `packages/core` (TS strict, no `any`).
