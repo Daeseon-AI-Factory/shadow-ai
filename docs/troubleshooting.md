@@ -1909,3 +1909,5 @@ rawHexMatches=0
 `git diff --check`도 stdout 없이 exit 0이었다. 실제 iOS/Android light/dark 렌더, 손가락 press 체감, 키보드 focus ring은 [unverified]다. R2–R4 화면 통합과 전역 screen raw-color acceptance도 이 R1 범위에서는 [unverified]다.
 
 **Commit.** `117b97c94d616d70b5a4e33df26f64c23d3c67cd`
+
+<!-- override-trigger: e8fed45 Merge remote-tracking branch 'origin/codex/redesign-r1' into integration/tracks — 통합(머지) 커밋이며 852 LOC는 R1 브랜치 자체 커밋들이 이미 로깅한 디자인 토큰·공용 컴포넌트 변경분이다. R1의 troubleshooting/mdx 로그가 이 머지로 함께 들어옴(중복 로깅 불필요). -->
