@@ -1261,3 +1261,33 @@ The SRS itself was fine: `drill-runner.tsx` already calls `practiceApi.grade(key
 
 <!-- override-trigger: 79e8f9a docs(log): realtime voice sparring v1 — WebView bridge decision (048c02e) [no-log] — false positive: this commit IS the log pair for feature commit 048c02e (troubleshooting entry + mdx narrative, both included in it); the keyword "decision" is in the log title, not an unlogged change -->
 <!-- skipped: dc1c646 chore(log): mark 79e8f9a as log-pair commit, trigger false positive [no-log] -->
+
+---
+
+## 2026-07-13 — F5: Claude text completions omitted the prompt-cache marker
+
+**Gap (verified in the pre-change source).** `ClaudeClient.analyzeClip()` marked its stable system
+block for ephemeral caching, but `ClaudeClient.complete()` built the block without that field:
+
+```java
+"system", List.of(Map.of("type", "text", "text", systemPrompt)),
+```
+
+**Cause (verified).** The two methods construct separate Anthropic Messages API request maps, and
+only the `analyzeClip()` map contained `"cache_control", Map.of("type", "ephemeral")`.
+
+**Fix.** `backend/src/main/java/com/tubeshadow/analysis/infrastructure/ClaudeClient.java` now adds
+the same ephemeral marker to `complete()`'s system content block. The new
+`ClaudeClientRequestTest` sends a completion to a local JDK `HttpServer` and inspects the received
+JSON, including system text, user text, token budget, model, and cache-control type. No provider
+request is made by the test. `SPARRING_MODEL` already supported `gpt-realtime-mini` as an environment
+override, so F5 did not change the shared chat/interview fallback model.
+
+**Verification.** `cd backend && ./gradlew test`:
+
+```text
+BUILD SUCCESSFUL in 36s
+4 actionable tasks: 1 executed, 3 up-to-date
+```
+
+**Commit.** This commit; the immutable hash is recorded by Git history.
