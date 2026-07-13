@@ -1399,3 +1399,5 @@ api.jjan / beside 도 동일하게 HTTP 000. docvault(303)·faangforge(200)만 �
 **Fix.** 스파링 시작 화면에 주제 칩(오늘복습/동사/구동사/콜로케이션/개발IT/AI코딩) 추가. `sparring.tsx`의 `candidatePool`을 팩별 함수(`verbsPool`/`phrasalPool`/`collocationsPool`/`itPool`/`aiCodingPool`)로 쪼개고 `TOPICS`+`poolFor(topic)`로 스코프. 타깃 useMemo가 `topic`에 의존 → 고른 팩에서만 due 우선 추출. 긴 표현은 기존 `chunkMatcher` 필터가 자동 제거하므로 팩은 sayable만 남긴다. **클라이언트 전용 — 백엔드/런타임 비용 0** (같은 엔드포인트). `tsc` 0 에러. 커밋 `30524ae`.
 
 **Pattern.** 콘텐츠에 이미 사람이 만든 분류(팩)가 있으면, 그게 곧 "주제 축"이다 — 임베딩 군집 같은 무거운 것 전에 기존 분류로 스코프하면 응집의 8할을 공짜로 얻는다.
+
+<!-- skipped: 3d055e3 docs(log): 스파링 주제 스코프 세션 [no-log] -->
