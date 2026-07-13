@@ -1261,3 +1261,52 @@ The SRS itself was fine: `drill-runner.tsx` already calls `practiceApi.grade(key
 
 <!-- override-trigger: 79e8f9a docs(log): realtime voice sparring v1 — WebView bridge decision (048c02e) [no-log] — false positive: this commit IS the log pair for feature commit 048c02e (troubleshooting entry + mdx narrative, both included in it); the keyword "decision" is in the log title, not an unlogged change -->
 <!-- skipped: dc1c646 chore(log): mark 79e8f9a as log-pair commit, trigger false positive [no-log] -->
+
+---
+
+## 2026-07-13 — API 요청에 종료 조건이 없어 영구 대기 가능
+
+**Symptom.** 변경 전 공용 API client의 실제 소스에는 caller `signal` 전달만 있고 내부
+timeout이 없었다.
+
+```text
+interface FetchOptions {
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  body?: Body;
+  query?: Record<string, string | number | boolean | undefined>;
+  signal?: AbortSignal;
+}
+...
+const response = await fetch(buildUrl(path, query), {
+  method,
+  headers,
+  body: serialized,
+  signal,
+  cache: "no-store",
+});
+```
+
+**Cause (verified).** `git show efcd7fe^:packages/core/src/api/client.ts`에서 `apiRequest()`가
+이 repo의 공용 `fetch()` choke point이지만 timer나 자체 `AbortController`를 만들지 않는 것을
+확인했다. 따라서 caller가 별도 signal을 주지 않으면 client 쪽 종료 조건이 없었다.
+
+**Fix.** `efcd7fe`: `packages/core/src/api/client.ts`에 일반 요청 15초, `FormData` 요청
+60초 기본값과 선택적 `timeoutMs`를 추가했다. caller abort를 내부 controller로 전달하고,
+내부 timer가 abort한 경우에만 `ApiError(408, "TIMEOUT")`로 바꾼다. timer와 caller listener는
+응답 성공·실패 모두 `finally`에서 제거한다.
+
+**Verified.** loopback 서버에서 정상 응답, 무응답, 15초 초과 `FormData` 응답을 실행했다.
+
+```text
+{"normal":"ok","timeout":{"status":408,"code":"TIMEOUT","elapsedMs":15160},"formData":{"result":"ok","elapsedMs":15758}}
+```
+
+기존 API 회귀 테스트는 `Tests  6 passed (6)`, mobile `npx tsc --noEmit`은 exit 0이었다.
+
+**Known gap.** `mobile/src/components/mic-input.tsx:45`의 legacy `uploadAsync()`는 공용 client를
+우회하며 이번 허용 파일 범위 밖이다. 그 직접 업로드 경로에는 이번 timeout이 적용되지 않는다.
+
+**Commit.** `efcd7fe`
+
+**Pattern.** caller 취소와 내부 deadline을 합성할 때는 누가 abort했는지 별도로 기록해야
+사용자 취소를 timeout으로 오분류하지 않는다.
