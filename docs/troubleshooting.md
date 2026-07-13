@@ -1907,4 +1907,4 @@ rawHexMatches=0
 
 `git diff --check`도 stdout 없이 exit 0이었다. 실제 iOS/Android light/dark 렌더, 손가락 press 체감, 키보드 focus ring은 [unverified]다. R2–R4 화면 통합과 전역 screen raw-color acceptance도 이 R1 범위에서는 [unverified]다.
 
-**Commit.** This R1 commit; git history records the immutable hash.
+**Commit.** `117b97c94d616d70b5a4e33df26f64c23d3c67cd`
