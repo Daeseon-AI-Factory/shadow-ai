@@ -1854,3 +1854,57 @@ review는 실패 전후 `1 / 1`, DrillRunner는 `1 / 12`, InterviewDrill은 `1 /
 **Commit.** Track D L6 commit (git history records the immutable hash).
 
 **Pattern.** dark input은 text만이 아니라 surface/border/placeholder/selection을 한 theme source에서 가져와야 한다. 공통 pressed opacity를 기본으로 두고 Android ripple을 추가하면 플랫폼별 피드백을 한 helper 계약으로 유지할 수 있다.
+
+---
+
+## 2026-07-13 — R1 공용 Pressable 구현이 nullable props와 children 타입에서 컴파일되지 않음
+
+**Symptom.** 첫 R1 구현 뒤 `npx tsc --noEmit --pretty false`가 다음 오류로 종료됐다.
+
+```text
+src/components/card.tsx(39,5): error TS2322: Type 'boolean | null' is not assignable to type 'boolean | undefined'.
+  Type 'null' is not assignable to type 'boolean | undefined'.
+src/components/card.tsx(58,52): error TS2322: Type 'boolean | null' is not assignable to type 'boolean | undefined'.
+  Type 'null' is not assignable to type 'boolean | undefined'.
+src/components/chip.tsx(71,5): error TS2322: Type 'boolean | null' is not assignable to type 'boolean | undefined'.
+  Type 'null' is not assignable to type 'boolean | undefined'.
+src/components/chip.tsx(87,52): error TS2322: Type 'boolean | null' is not assignable to type 'boolean | undefined'.
+  Type 'null' is not assignable to type 'boolean | undefined'.
+src/components/chip.tsx(96,9): error TS2322: Type 'ReactNode | ((state: PressableStateCallbackType) => ReactNode)' is not assignable to type 'ReactNode'.
+  Type '(state: PressableStateCallbackType) => ReactNode' is not assignable to type 'ReactNode'.
+src/components/talk-button.tsx(6,8): error TS2305: Module '"react-native"' has no exported member 'ReactNode'.
+src/components/talk-button.tsx(49,5): error TS2322: Type 'boolean | null' is not assignable to type 'boolean | undefined'.
+  Type 'null' is not assignable to type 'boolean | undefined'.
+src/components/talk-button.tsx(69,52): error TS2322: Type 'boolean | null' is not assignable to type 'boolean | undefined'.
+  Type 'null' is not assignable to type 'boolean | undefined'.
+```
+
+**Cause (verified).** 설치된 React Native 0.85 `PressableProps`는 `disabled`에 `null`을 허용하고, `children`에는 `{ pressed }` render function도 허용한다. `ReactNode`는 `react`가 export하며 `react-native`는 export하지 않는다. 같은 RN 소스의 `fontWeight` 변환은 100 단위만 받아 명세의 750을 그대로 넘기면 regular로 처리한다. 또한 `docs/REDESIGN.md` 표의 primary/live/mint 값은 실제 `theme.ts` 값과 달랐고, 사용자 지시는 기존 값을 유지하라고 명시했다.
+
+**Fix.** `theme.ts`는 기존 primary/coral/accent 값을 primary/live/mint 의미로 보존하고 light/dark 양쪽에 liveSoft, mintSoft, amber, ink, pressed와 대비용 on-color를 추가했다. `themed-text.tsx`는 display/body/mono label과 RN 지원값 700의 section을 추가하되 기존 variant 치수는 유지하고 linkPrimary raw color를 제거했다. `pressable-feedback.ts`는 기존 transform 배열과 CSS 문자열을 보존하며 opacity 0.82와 scale 0.98을 합성하고, 별도 focus 상태에 primary outline을 적용한다. `Card`, `Chip`, `PrimaryButton`, `TalkButton`은 nullable disabled를 boolean으로 정규화하고 scheme token, Android ripple, focus ring, 접근성 state, native View ref를 공유한다. `Card`의 interaction 판정에는 press/hover/focus callback을 포함한다. 기존 화면 import를 깨지 않도록 accent/accentSoft/coral과 use-theme helper export는 deprecated 호환 경로로 남겼다.
+
+**Verification.** 최종 명령 출력은 다음과 같다.
+
+```text
+$ npx tsc --noEmit --pretty false
+[exit 0; stdout empty]
+
+$ theme parity and text contrast
+light keys=24 minTextContrast=4.69
+dark keys=24 minTextContrast=7.06
+
+$ focus contrast
+light minFocusContrast=3.74
+dark minFocusContrast=4.63
+
+$ pressed transform composition
+array opacity=0.82 transform=[{"translateX":12},{"rotate":"5deg"},{"scale":0.98}]
+string opacity=0.82 transform=translateX(12px) rotate(5deg) scale(0.98)
+
+$ raw component colors
+rawHexMatches=0
+```
+
+`git diff --check`도 stdout 없이 exit 0이었다. 실제 iOS/Android light/dark 렌더, 손가락 press 체감, 키보드 focus ring은 [unverified]다. R2–R4 화면 통합과 전역 screen raw-color acceptance도 이 R1 범위에서는 [unverified]다.
+
+**Commit.** This R1 commit; git history records the immutable hash.
