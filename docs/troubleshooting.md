@@ -1297,7 +1297,7 @@ BUILD SUCCESSFUL in 36s
 **Gap (verified).** The F5 commit had no backend route containing `sparring/report`:
 
 ```text
-git grep -n 'sparring/report' 4076730 -- backend
+git grep -n 'sparring/report' 7baabac -- backend
 # no matches; exit 1
 ```
 
@@ -1336,7 +1336,7 @@ nor grades. For each returned missed target, exclude keys already in the screen'
 **Gap (verified).** The F1 commit had no backend `jobDescription` field or call-chain reference:
 
 ```text
-git grep -n 'jobDescription' 6e14456 -- backend
+git grep -n 'jobDescription' 0681bb5 -- backend
 # no matches; exit 1
 ```
 
@@ -1364,5 +1364,40 @@ actually produces stack-specific questions is unverified.
 **Client follow-up (not implemented in this backend commit).** Add an optional JD paste field on the
 mock-interview screen and include the same `jobDescription` value on every `/interview/mock` request
 in the session, not only the opener.
+
+**Commit.** This commit; the immutable hash is recorded by Git history.
+
+---
+
+## 2026-07-13 — F6: AI routes did not enforce the existing paid-plan entitlement
+
+**Gap (verified against `origin/main` at `3c10afc`).** `User.effectivePlan(now)` existed, but
+`AiGate.java` did not and `PracticeController` contained no `assertEntitled` call. The existing
+realtime `SparringClient` was already mint-only and contained no authorization gate. Therefore all
+eleven AI-backed practice routes lacked plan enforcement.
+
+**Fix.** `AiGate.assertEntitled(userId)` now loads the current `User` from `UserRepository` and
+allows a request when `effectivePlan(Instant.now(clock))` is not `free`. The existing
+`AI_ALLOWED_EMAILS` value remains a case-insensitive owner/tester override based on the current DB
+email. Missing users, free plans, and expired paid plans fail closed with `403 AI_NOT_ALLOWED`.
+All eleven AI-backed controller entry points now pass the authenticated user ID to this single gate,
+including both realtime session minting and the F1 sparring-report endpoint. `SparringClient`
+remains mint-only; authorization is enforced at the controller boundary before it is called.
+
+No credit ledger, entity, repository, or Flyway migration was added. Boolean plan enforcement uses
+the existing user-plan columns and `effectivePlan` behavior.
+
+**Verification.** `cd backend && ./gradlew --no-daemon test --rerun-tasks`:
+
+```text
+BUILD SUCCESSFUL in 32s
+4 actionable tasks: 4 executed
+```
+
+The generated JUnit XML contained no non-zero `failures` or `errors` attribute (`rg` returned no
+matches, exit 1). Tests cover free, active paid, non-expiring paid, expired paid, allowlisted free,
+missing-user, and null-ID gate behavior, plus UUID-gate use by a general AI endpoint and realtime
+sparring. No live billing webhook or paid external-model request was made, so deployed entitlement
+and provider behavior remain unverified.
 
 **Commit.** This commit; the immutable hash is recorded by Git history.

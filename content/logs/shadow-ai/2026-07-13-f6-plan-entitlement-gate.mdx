@@ -1,0 +1,46 @@
+---
+title: "F6 — Enforcing the existing paid plan at every AI boundary"
+date: "2026-07-13"
+project: "shadow-ai"
+kind: "update"
+visibility: "public"
+language: "en"
+summary: "Every AI-backed practice route now uses the existing user-plan entitlement, while retaining a narrow email override for owners and testers."
+tags: ["backend", "entitlement", "billing", "security"]
+---
+
+## What changed
+
+The repository already stored `free` or `pro` on `User`, tracked an optional plan expiry, and exposed
+`effectivePlan(now)` so an expired paid plan reads as free. The missing piece on the current `main`
+branch was enforcement: it had no `AiGate` component and no AI practice route called
+`effectivePlan`. Realtime `SparringClient` was already mint-only and contained no authorization gate.
+
+`AiGate.assertEntitled(userId)` is now the single enforcement point. It reloads the current user,
+checks `effectivePlan` at a clock-provided instant, and permits non-free plans. The existing
+`AI_ALLOWED_EMAILS` setting remains a case-insensitive owner/tester override using the email loaded
+from the database rather than the potentially stale JWT email. A missing user, free plan, or expired
+paid plan receives `403 AI_NOT_ALLOWED`.
+
+All eleven AI-backed `PracticeController` methods use the UUID gate, including realtime session
+minting and end-of-session sparring reports. `SparringClient` remains focused on constructing and
+sending a mint request after the controller has authorized the caller.
+
+## Scope boundary
+
+This is boolean plan gating only. It adds no credit ledger, persistence model, repository, or
+Flyway migration. Per-minute credits remain separate work requiring explicit schema approval.
+
+## Verification boundary
+
+The complete backend suite was forced to rerun:
+
+```text
+BUILD SUCCESSFUL in 32s
+4 actionable tasks: 4 executed
+```
+
+Automated tests cover free, active paid, non-expiring paid, expired paid, allowlisted free,
+missing-user, and null-ID decisions. Controller tests verify that a general AI route and realtime
+sparring both call the UUID-based gate. No live billing webhook, production database, or paid model
+request was exercised, so deployment and product-workflow verification remain unverified.
