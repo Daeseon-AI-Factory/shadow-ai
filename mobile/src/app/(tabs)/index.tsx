@@ -1,15 +1,16 @@
+import { useCallback } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Redirect, router } from 'expo-router';
+import { Redirect, router, useFocusEffect } from 'expo-router';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { useQuery } from '@tanstack/react-query';
-import { authApi, clipsApi, reviewApi } from '@shadow-ai/core';
+import { authApi, clipsApi, libraryApi, reviewApi } from '@shadow-ai/core';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { ErrorState } from '@/components/error-state';
 import { useTheme } from '@/hooks/use-theme';
 import { useAuthStore } from '@/lib/auth-store';
-import { useLastClip } from '@/lib/last-clip';
 import { haptic } from '@/lib/haptics';
 import { t } from '@/lib/i18n';
 
@@ -18,23 +19,51 @@ const SCREENSHOT_DISPLAY_NAME = process.env.EXPO_PUBLIC_SCREENSHOT_DISPLAY_NAME;
 
 /**
  * Today — the home screen leads with ONE action, not a grid of features. We pick the single most
- * useful next step (reviews due → resume last clip → import a first video) so the user knows what to
- * tap in a second. Everything else (videos, drills) is one tap behind the two slim cards below.
+ * useful next step (reviews due → open newest clip → pick a line → import a first video) so the user
+ * knows what to tap in a second. Everything else is one tap behind the two slim cards below.
  */
 export default function TodayScreen() {
   const token = useAuthStore((s) => s.token);
   const hydrated = useAuthStore((s) => s.hydrated);
   const theme = useTheme();
 
-  const me = useQuery({ queryKey: ['me'], queryFn: () => authApi.me(), enabled: !!token });
-  const streak = useQuery({ queryKey: ['streak'], queryFn: () => reviewApi.streak(), enabled: !!token });
+  const me = useQuery({
+    queryKey: ['me'],
+    queryFn: () => authApi.me(),
+    enabled: !!token,
+    // A valid cold start seeds this cache during silent token validation.
+    staleTime: 60_000,
+    // L1 already bounds each request; show the explicit retry state after one failed attempt.
+    retry: false,
+  });
+  const streak = useQuery({
+    queryKey: ['streak'],
+    queryFn: () => reviewApi.streak(),
+    enabled: !!token,
+    retry: false,
+  });
   // size:1 with the default "newest" sort → the most recent clip, used as the "continue" target.
   const recent = useQuery({
     queryKey: ['clips', 'recent'],
     queryFn: () => clipsApi.list({ size: 1 }),
     enabled: !!token,
+    retry: false,
   });
-  const lastClip = useLastClip();
+  const latestVideo = useQuery({
+    // Keep this distinct from Videos' size:50 cache while retaining import's prefix invalidation.
+    queryKey: ['library', 'videos', 'latest'],
+    queryFn: () => libraryApi.list({ page: 0, size: 1 }),
+    enabled: !!token,
+    retry: false,
+  });
+  // Expo Router keeps Home mounted. Refresh the decision inputs whenever the learner returns from
+  // importing, clipping, or reviewing so the next action reflects the work they just completed.
+  useFocusEffect(
+    useCallback(() => {
+      if (!token) return;
+      void Promise.all([streak.refetch(), recent.refetch(), latestVideo.refetch()]);
+    }, [token, streak.refetch, recent.refetch, latestVideo.refetch]),
+  );
 
   if (!hydrated) {
     return (
@@ -46,13 +75,44 @@ export default function TodayScreen() {
   if (!token) return <Redirect href="/login" />;
 
   const due = streak.data?.dueToday ?? 0;
-  const streakDays = streak.data?.streakDays ?? 0;
   const recentClip = recent.data?.items?.[0];
-  // Prefer the clip you last opened; fall back to your newest clip.
-  const resume =
-    lastClip ??
-    (recentClip ? { id: recentClip.id, name: recentClip.name || recentClip.videoTitle || '' } : null);
-  const settling = streak.isPending || recent.isPending;
+  const savedVideo = latestVideo.data?.items?.[0];
+  const readyVideo = savedVideo?.video.transcriptStatus === 'READY' ? savedVideo : null;
+  // Use only the server-scoped result. The legacy on-device lastClip key is not user-scoped and
+  // can point a newly signed-in account at another user's inaccessible clip.
+  const resume = recentClip
+    ? { id: recentClip.id, name: recentClip.name || recentClip.videoTitle || '' }
+    : null;
+  // Library is only load-bearing when there is no review or clip to resume. A supplemental
+  // library outage must not hide a working higher-priority action.
+  const recentBlocksPrimary = recent.isError && !recentClip && due === 0 && !streak.isPending;
+  const latestVideoBlocksPrimary =
+    latestVideo.isError &&
+    !savedVideo &&
+    due === 0 &&
+    !resume &&
+    !streak.isPending &&
+    !recent.isPending;
+
+  if ((me.isError && !me.data) || (streak.isError && !streak.data) || recentBlocksPrimary || latestVideoBlocksPrimary) {
+    return (
+      <ThemedView style={styles.flex}>
+        <SafeAreaView style={styles.flex} edges={['top']}>
+          <ErrorState
+            onRetry={() => {
+              void Promise.all([me.refetch(), streak.refetch(), recent.refetch(), latestVideo.refetch()]);
+            }}
+          />
+        </SafeAreaView>
+      </ThemedView>
+    );
+  }
+
+  const streakDays = streak.data?.streakDays ?? 0;
+  const settling =
+    streak.isPending ||
+    (due === 0 && recent.isPending) ||
+    (due === 0 && !resume && latestVideo.isPending);
 
   // The one action that matters most right now.
   const primary: PrimaryAction =
@@ -70,12 +130,26 @@ export default function TodayScreen() {
             sub: resume.name || t('today.resumeSub'),
             onPress: () => router.push(`/player/${resume.id}`),
           }
-        : {
-            icon: { ios: 'plus', android: 'add', web: 'add' },
-            title: t('today.importCta'),
-            sub: t('today.importSub'),
-            onPress: () => router.push('/import'),
-          };
+        : readyVideo
+          ? {
+              icon: { ios: 'scissors', android: 'content_cut', web: 'content_cut' },
+              title: t('today.pickLineCta'),
+              sub: t('today.pickLineSub'),
+              onPress: () => router.push(`/video/${readyVideo.video.id}`),
+            }
+          : savedVideo
+            ? {
+                icon: { ios: 'arrow.clockwise', android: 'refresh', web: 'refresh' },
+                title: t('today.tryAnotherCta'),
+                sub: t('today.tryAnotherSub'),
+                onPress: () => router.push('/import'),
+              }
+          : {
+              icon: { ios: 'plus', android: 'add', web: 'add' },
+              title: t('today.importCta'),
+              sub: t('today.importSub'),
+              onPress: () => router.push('/import'),
+            };
 
   const streakText =
     streakDays > 0 || due > 0 ? t('today.streakLine', { days: streakDays, due }) : t('today.streakEmpty');

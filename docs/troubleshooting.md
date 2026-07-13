@@ -1261,3 +1261,165 @@ The SRS itself was fine: `drill-runner.tsx` already calls `practiceApi.grade(key
 
 <!-- override-trigger: 79e8f9a docs(log): realtime voice sparring v1 — WebView bridge decision (048c02e) [no-log] — false positive: this commit IS the log pair for feature commit 048c02e (troubleshooting entry + mdx narrative, both included in it); the keyword "decision" is in the log title, not an unlogged change -->
 <!-- skipped: dc1c646 chore(log): mark 79e8f9a as log-pair commit, trigger false positive [no-log] -->
+
+---
+
+## 2026-07-13 — API 요청에 종료 조건이 없어 영구 대기 가능
+
+**Symptom.** 변경 전 공용 API client의 실제 소스에는 caller `signal` 전달만 있고 내부
+timeout이 없었다.
+
+```text
+interface FetchOptions {
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  body?: Body;
+  query?: Record<string, string | number | boolean | undefined>;
+  signal?: AbortSignal;
+}
+...
+const response = await fetch(buildUrl(path, query), {
+  method,
+  headers,
+  body: serialized,
+  signal,
+  cache: "no-store",
+});
+```
+
+**Cause (verified).** `git show efcd7fe^:packages/core/src/api/client.ts`에서 `apiRequest()`가
+이 repo의 공용 `fetch()` choke point이지만 timer나 자체 `AbortController`를 만들지 않는 것을
+확인했다. 따라서 caller가 별도 signal을 주지 않으면 client 쪽 종료 조건이 없었다.
+
+**Fix.** `efcd7fe`: `packages/core/src/api/client.ts`에 일반 요청 15초, `FormData` 요청
+60초 기본값과 선택적 `timeoutMs`를 추가했다. caller abort를 내부 controller로 전달하고,
+내부 timer가 abort한 경우에만 `ApiError(408, "TIMEOUT")`로 바꾼다. timer와 caller listener는
+응답 성공·실패 모두 `finally`에서 제거한다.
+
+**Verified.** loopback 서버에서 정상 응답, 무응답, 15초 초과 `FormData` 응답을 실행했다.
+
+```text
+{"normal":"ok","timeout":{"status":408,"code":"TIMEOUT","elapsedMs":15160},"formData":{"result":"ok","elapsedMs":15758}}
+```
+
+기존 API 회귀 테스트는 `Tests  6 passed (6)`, mobile `npx tsc --noEmit`은 exit 0이었다.
+
+**Known gap.** `mobile/src/components/mic-input.tsx:45`의 legacy `uploadAsync()`는 공용 client를
+우회하며 이번 허용 파일 범위 밖이다. 그 직접 업로드 경로에는 이번 timeout이 적용되지 않는다.
+
+**Commit.** `efcd7fe`
+
+**Pattern.** caller 취소와 내부 deadline을 합성할 때는 누가 abort했는지 별도로 기록해야
+사용자 취소를 timeout으로 오분류하지 않는다.
+
+---
+
+## 2026-07-13 — 저장 토큰을 먼저 노출해 만료 세션이 Home을 거치는 부팅 흐름
+
+**Symptom.** 변경 전 root layout은 SecureStore Promise의 성공 경로만 연결하고, 저장 토큰을
+검증하지 않은 채 곧바로 인증 상태로 hydrate했다.
+
+```text
+loadToken().then((token) => hydrate(token));
+```
+
+keychain 읽기가 reject되면 `hydrated`가 계속 false였고, 만료 토큰은 Home의 인증 쿼리들이
+401을 받은 뒤에야 전역 handler가 로그인으로 보냈다.
+
+**Cause (verified).** `git show ae42b74^:mobile/src/app/_layout.tsx`에서 `loadToken()`에
+reject 경로와 사전 `authApi.me()` 검증이 없음을 확인했다. Home에도 쿼리 오류 분기가 없어
+실패 데이터를 빈 계정으로 해석할 수 있었다.
+
+**Fix.** `ae42b74`: Expo SDK 56 splash를 module scope에서 붙잡고, 저장 토큰이 있으면 UI를
+mount하기 전에 L1 timeout이 적용되는 `authApi.me()`로 한 번 검증한다. 성공 응답은 `['me']`
+cache에 seed하고, 401은 live token과 query cache를 먼저 지운 뒤 Login을 초기 route로 연다.
+SecureStore 읽기 실패도 `hydrate(null)`로 끝내 부팅 대기를 해제한다. 중간 세션 401은 동시
+handler를 하나로 합치고 401 재시도를 생략한다. Home의 첫 쿼리들은 한 번 실패하면 명시적
+retry 화면을 보여 빈 상태 CTA로 오인하지 않게 했다.
+
+**Verified.** 실제 root layout을 mock 경계와 함께 import한 임시 Vitest에서 valid token,
+startup 401 + token 삭제 실패, keychain read 실패의 3경로를 실행했다.
+
+```text
+Test Files  1 passed (1)
+Tests  3 passed (3)
+```
+
+TanStack Query 임시 Vitest에서는 401 무재시도·동시 handler 1회·비인증 오류 3회 재시도를
+실행했다.
+
+```text
+Test Files  1 passed (1)
+Tests  2 passed (2)
+```
+
+최신 L2 커밋 직전 `npx tsc --noEmit`은 exit 0, `git diff --cached --check`도 exit 0이었다.
+
+**Unverified.** release build의 실제 iOS/Android 콜드 스타트에서 splash→Login/Home 시각적
+전환은 실행하지 않았다. timeout·offline처럼 검증 결과가 401이 아닌 경우에는 저장 토큰을
+삭제하지 않고 Home의 retry 화면으로 넘기는 fail-open 정책이다.
+
+**Commit.** `ae42b74`
+
+**Pattern.** 저장 credential을 읽었다는 사실과 서버가 그 credential을 인정한다는 사실을
+분리한다. 검증이 끝날 때까지 native splash를 유지하고, 모든 Promise reject 경로가 반드시
+부팅 상태를 종결하도록 만든다.
+
+---
+
+## 2026-07-13 — 신규 사용자의 무료 학습 경로가 일반 import CTA에서 끊김
+
+**Symptom.** 변경 전 Home은 복습이나 기존 클립이 없으면 맥락 없이 import로만 보냈고,
+온보딩 마지막 단계는 실제 학습 경로 대신 일일 시간 목표를 물었다.
+
+```text
+title: t('today.importCta'),
+sub: t('today.importSub'),
+onPress: () => router.push('/import'),
+...
+<ThemedText type="title" style={styles.title}>{t('onboard.goalTitle')}</ThemedText>
+```
+
+**Cause (verified).** `git show 90f6b9e^`로 Home의 primary action이 review → clip → import 세
+경우뿐이고, 온보딩 3단계가 5/15/30분 목표 선택임을 확인했다. 저장 영상의 transcript 상태를
+읽어 첫 문장 선택으로 이어 주는 분기도 없었다.
+
+**Fix.** `90f6b9e`: `mobile/src/app/onboarding.tsx`를 무료 shadow → 기기 내 dictation → review
+루프와 초대 전용 AI 대화·답안 채점을 구분하는 3단계 안내로 바꿨다. 완료 flag 저장이 실패해도
+Home으로 빠져나온다. `mobile/src/app/(tabs)/index.tsx`는 review → 서버의 최신 clip → transcript가
+READY인 저장 영상 → 자막 영상 import 순으로 하나의 CTA를 고르고, transcript가 없는 저장 영상은
+다른 영상 import로 복구한다. 기기 전역 `lastClip`은 계정 간 섞일 수 있어 Home 판단에서 제외했다.
+`mobile/src/lib/i18n-messages.ts`에 영어·한국어 문구를 함께 추가했다.
+
+**Verified.** 실제 화면 모듈을 import한 임시 Vitest에서 CTA 우선순위, transcript 없는 영상의
+복구, SecureStore reject 시 온보딩 탈출, 보조 query 실패와 cached-data refetch 실패를 실행했다.
+
+```text
+Test Files  1 passed (1)
+Tests  7 passed (7)
+```
+
+mobile `npx tsc --noEmit`은 출력 없이 exit 0이었다. Expo export는 두 플랫폼 모두 완료됐다.
+
+```text
+iOS Bundled 18636ms node_modules/expo-router/entry.js (1289 modules)
+Exported: /private/tmp/track-a-final-rebased-ios-20260713
+Android Bundled 11449ms node_modules/expo-router/entry.js (1726 modules)
+Exported: /private/tmp/track-a-final-rebased-android-20260713
+```
+
+실제 iOS Simulator에서도 앱 내 신규 가입이 온보딩으로 자동 이동하는 것을 확인했다. 별도의 신규
+로컬 계정으로 3단계 온보딩 → Home의 `Start the free learning loop` → 자막 YouTube import → 첫
+문장 clip → 기기 내 dictation 채점까지 진행했고 `12/21 words` 결과가 표시됐다. 이 경로에서는
+invite gate나 dead end가 나타나지 않았다.
+
+**Unverified.** 위 두 실기 검증은 iOS의 `Save Password?` 시스템 대화상자 때문에 하나의 끊김
+없는 신규 가입 run으로 실행하지는 못했다. release build의 전체 first-run과 실제 shadow 녹음,
+review 완료도 확인하지 않았다. import 직후 transcript가 UNAVAILABLE인 화면의 즉시 복구는 이번
+허용 범위 밖이다.
+
+**Known cost gap.** `ClipService`는 clip 저장 뒤 `ClipCreatedEvent`를 발행하고,
+`ClipAnalysisService`는 transcript와 configured provider가 있으면 `aiClient.analyzeClip()`을 호출한다.
+이 경로에는 `AiGate`가 없으므로 “사용자 무료” 경로는 맞지만 “운영비 zero cost”는 현재 코드와
+일치하지 않는다. 백엔드는 다른 트랙 소유라 이번 커밋에서 변경하지 않았다.
+
+**Commit.** `90f6b9e`

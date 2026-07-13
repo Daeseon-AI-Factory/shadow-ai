@@ -33,12 +33,16 @@ export function setTokenProvider(provider: () => string | null) {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Body = Record<string, any> | unknown[] | FormData | undefined;
 
-interface FetchOptions {
+export interface FetchOptions {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: Body;
   query?: Record<string, string | number | boolean | undefined>;
   signal?: AbortSignal;
+  timeoutMs?: number;
 }
+
+const DEFAULT_TIMEOUT_MS = 15_000;
+const UPLOAD_TIMEOUT_MS = 60_000;
 
 function buildUrl(path: string, query?: FetchOptions["query"]) {
   const url = new URL(path.startsWith("http") ? path : `${baseUrl}${path}`);
@@ -52,6 +56,7 @@ function buildUrl(path: string, query?: FetchOptions["query"]) {
 
 export async function apiRequest<T>(path: string, options: FetchOptions = {}): Promise<T> {
   const { method = "GET", body, query, signal } = options;
+  const timeoutMs = options.timeoutMs ?? (body instanceof FormData ? UPLOAD_TIMEOUT_MS : DEFAULT_TIMEOUT_MS);
 
   const headers: Record<string, string> = {};
   const token = tokenProvider?.();
@@ -65,23 +70,51 @@ export async function apiRequest<T>(path: string, options: FetchOptions = {}): P
     serialized = JSON.stringify(body);
   }
 
-  const response = await fetch(buildUrl(path, query), {
-    method,
-    headers,
-    body: serialized,
-    signal,
-    cache: "no-store",
-  });
+  const controller = new AbortController();
+  let timedOut = false;
+  const forwardCallerAbort = () => controller.abort();
 
-  const text = await response.text();
-  const payload = text ? (JSON.parse(text) as ApiEnvelope<T>) : ({ data: null, error: null, timestamp: "" } as ApiEnvelope<T>);
-
-  if (!response.ok || payload.error) {
-    const error = payload.error ?? { code: "HTTP_ERROR", message: response.statusText };
-    throw new ApiError(response.status, error.code, error.message);
+  if (signal?.aborted) {
+    forwardCallerAbort();
+  } else {
+    signal?.addEventListener("abort", forwardCallerAbort, { once: true });
   }
 
-  return payload.data as T;
+  const timeout = setTimeout(() => {
+    // A caller abort wins a same-tick race; only our timer maps the failure to TIMEOUT.
+    if (!controller.signal.aborted) {
+      timedOut = true;
+      controller.abort();
+    }
+  }, timeoutMs);
+
+  try {
+    const response = await fetch(buildUrl(path, query), {
+      method,
+      headers,
+      body: serialized,
+      signal: controller.signal,
+      cache: "no-store",
+    });
+
+    const text = await response.text();
+    const payload = text ? (JSON.parse(text) as ApiEnvelope<T>) : ({ data: null, error: null, timestamp: "" } as ApiEnvelope<T>);
+
+    if (!response.ok || payload.error) {
+      const error = payload.error ?? { code: "HTTP_ERROR", message: response.statusText };
+      throw new ApiError(response.status, error.code, error.message);
+    }
+
+    return payload.data as T;
+  } catch (error) {
+    if (timedOut) {
+      throw new ApiError(408, "TIMEOUT", "Request timed out");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+    signal?.removeEventListener("abort", forwardCallerAbort);
+  }
 }
 
 export const apiClient = {
