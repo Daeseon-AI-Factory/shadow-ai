@@ -7,6 +7,7 @@ import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import {
   VERB_PACK,
   verbKey,
+  PARTICLE_FAMILIES,
   PHRASAL_500,
   phrasal500Key,
   COLLOCATIONS,
@@ -42,7 +43,11 @@ const CONNECT_TIMEOUT_MS = 12_000;
 type Mode = 'chat' | 'interview';
 type Phase = 'idle' | 'connecting' | 'live' | 'done';
 type Candidate = { key: string; label: string; ko: string };
+type VerbCandidate = Candidate & { verbId: string };
 type Line = { who: 'me' | 'ai'; text: string };
+type ScopeAxis = 'verb' | 'particle';
+
+const ALL_SCOPE = '__all__';
 
 function logSparringError(context: string, error: unknown) {
   const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
@@ -53,14 +58,35 @@ function logSparringError(context: string, error: unknown) {
 // so the AI weaves them into a single coherent thread instead of hopping (dev terms + phrasals
 // + collocations in one chat feels forced). Long entries are dropped later by chunkMatcher, so a
 // topic auto-keeps only its sayable expressions.
-const verbsPool = (): Candidate[] =>
-  VERB_PACK.flatMap((g) => g.items.map((it, i) => ({ key: verbKey(g.id, i), label: it.model, ko: it.cue })));
+const VERB_CANDIDATES: VerbCandidate[] = VERB_PACK.flatMap((g) =>
+  g.items.map((it, i) => ({ key: verbKey(g.id, i), label: it.model, ko: it.cue, verbId: g.id })),
+);
+const VERB_CANDIDATE_BY_KEY = new Map(VERB_CANDIDATES.map((candidate) => [candidate.key, candidate]));
+const verbsPool = (verbId?: string): Candidate[] =>
+  verbId ? VERB_CANDIDATES.filter((candidate) => candidate.verbId === verbId) : VERB_CANDIDATES;
+const particlePool = (particle: string): Candidate[] =>
+  (PARTICLE_FAMILIES[particle] ?? [])
+    .map((key) => VERB_CANDIDATE_BY_KEY.get(key))
+    .filter((candidate): candidate is VerbCandidate => Boolean(candidate));
 const phrasalPool = (): Candidate[] =>
   PHRASAL_500.map((p, i) => ({ key: phrasal500Key(i), label: p.phrasal, ko: p.ko }));
 const collocationsPool = (): Candidate[] =>
   COLLOCATIONS.flatMap((c) => c.items.map((it, i) => ({ key: collocationKey(c.id, i), label: c.anchor, ko: c.gloss })));
 const aiCodingPool = (): Candidate[] => AI_CODING.map((p, i) => ({ key: aiCodingKey(i), label: p.en, ko: p.ko }));
 const itPool = (): Candidate[] => IT_TERMS.map((p, i) => ({ key: itTermKey(i), label: p.en, ko: p.ko }));
+
+const VERB_SCOPE_GROUPS = VERB_PACK.map((group) => ({
+  id: group.id,
+  label: group.verb === 'APPENDIX' ? 'PHRASE' : group.verb,
+  n: group.items.filter((item) => chunkMatcher(item.model)).length,
+})).filter((group) => group.n > 0);
+const PARTICLE_SCOPE_GROUPS = Object.keys(PARTICLE_FAMILIES)
+  .map((particle) => ({
+    id: particle,
+    label: particle,
+    n: particlePool(particle).filter((candidate) => chunkMatcher(candidate.label)).length,
+  }))
+  .filter((group) => group.n > 0);
 
 type TopicKey = 'due' | 'learning' | 'verbs' | 'phrasal' | 'collocations' | 'aicoding' | 'it';
 const TOPICS: { key: TopicKey; pool: () => Candidate[] }[] = [
@@ -72,8 +98,11 @@ const TOPICS: { key: TopicKey; pool: () => Candidate[] }[] = [
   { key: 'it', pool: itPool },
   { key: 'aicoding', pool: aiCodingPool },
 ];
-const poolFor = (topic: TopicKey): Candidate[] =>
-  (TOPICS.find((tp) => tp.key === topic) ?? TOPICS[0]).pool();
+const poolFor = (topic: TopicKey, scopeAxis: ScopeAxis, scopePick: string): Candidate[] => {
+  const selected = TOPICS.find((candidate) => candidate.key === topic) ?? TOPICS[0];
+  if (topic !== 'verbs' || scopePick === ALL_SCOPE) return selected.pool();
+  return scopeAxis === 'verb' ? verbsPool(scopePick) : particlePool(scopePick);
+};
 
 export default function SparringScreen() {
   const token = useAuthStore((s) => s.token);
@@ -84,6 +113,8 @@ export default function SparringScreen() {
   const [lines, setLines] = useState<Line[]>([]);
   const [elapsed, setElapsed] = useState(0);
   const [topic, setTopic] = useState<TopicKey>('due');
+  const [scopeAxis, setScopeAxis] = useState<ScopeAxis>('verb');
+  const [scopePick, setScopePick] = useState(ALL_SCOPE);
   const webRef = useRef<WebView>(null);
   const scrollRef = useRef<ScrollView>(null);
   const connectAttemptRef = useRef(0);
@@ -98,7 +129,7 @@ export default function SparringScreen() {
     const states = srs.data as SrsCard[];
     const due: Candidate[] = [];
     const known: Candidate[] = [];
-    const all = poolFor(topic).filter((c) => chunkMatcher(c.label));
+    const all = poolFor(topic, scopeAxis, scopePick).filter((c) => chunkMatcher(c.label));
     if (topic === 'learning') {
       const { learning, fresh } = partitionLearning(all, states, today);
       return [...learning, ...shuffle(fresh)]
@@ -119,7 +150,7 @@ export default function SparringScreen() {
       );
     }
     return picked.map((c) => ({ ...c, re: chunkMatcher(c.label)! }));
-  }, [srs.data, topic]);
+  }, [srs.data, topic, scopeAxis, scopePick]);
 
   useEffect(() => {
     if (phase !== 'live') return;
@@ -183,6 +214,16 @@ export default function SparringScreen() {
     setElapsed(0);
     setPhase('idle');
     srs.refetch(); // graded cards moved boxes — refresh so the next round picks new dues
+  };
+
+  const chooseTopic = (next: TopicKey) => {
+    setTopic(next);
+    setScopePick(ALL_SCOPE);
+  };
+
+  const chooseScopeAxis = (next: ScopeAxis) => {
+    setScopeAxis(next);
+    setScopePick(ALL_SCOPE);
   };
 
   const onMessage = (e: WebViewMessageEvent) => {
@@ -295,7 +336,7 @@ export default function SparringScreen() {
               {TOPICS.map((tp) => (
                 <Pressable
                   key={tp.key}
-                  onPress={() => setTopic(tp.key)}
+                  onPress={() => chooseTopic(tp.key)}
                   style={[styles.topicChip, topic === tp.key && styles.topicChipOn]}
                   accessibilityRole="button"
                   accessibilityState={{ selected: topic === tp.key }}
@@ -306,6 +347,56 @@ export default function SparringScreen() {
                 </Pressable>
               ))}
             </View>
+
+            {topic === 'verbs' && (
+              <View style={styles.scopeWrap}>
+                <ThemedText type="smallBold">{t('sparring.scopeTitle')}</ThemedText>
+                <View style={styles.scopeAxisRow}>
+                  {(['verb', 'particle'] as ScopeAxis[]).map((axis) => (
+                    <Pressable
+                      key={axis}
+                      style={[styles.scopeAxisBtn, scopeAxis === axis && styles.scopeSelected]}
+                      onPress={() => chooseScopeAxis(axis)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: scopeAxis === axis }}
+                    >
+                      <ThemedText style={scopeAxis === axis ? styles.scopeSelectedText : styles.scopeText}>
+                        {t(`sparring.scope_${axis}`)}
+                      </ThemedText>
+                    </Pressable>
+                  ))}
+                </View>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.scopeChips}
+                >
+                  <Pressable
+                    style={[styles.scopeChip, scopePick === ALL_SCOPE && styles.scopeSelected]}
+                    onPress={() => setScopePick(ALL_SCOPE)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: scopePick === ALL_SCOPE }}
+                  >
+                    <ThemedText style={scopePick === ALL_SCOPE ? styles.scopeSelectedText : styles.scopeText}>
+                      {t('sparring.scopeAll')}
+                    </ThemedText>
+                  </Pressable>
+                  {(scopeAxis === 'verb' ? VERB_SCOPE_GROUPS : PARTICLE_SCOPE_GROUPS).map((group) => (
+                    <Pressable
+                      key={group.id}
+                      style={[styles.scopeChip, scopePick === group.id && styles.scopeSelected]}
+                      onPress={() => setScopePick(group.id)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: scopePick === group.id }}
+                    >
+                      <ThemedText style={scopePick === group.id ? styles.scopeSelectedText : styles.scopeText}>
+                        {group.label} · {group.n}
+                      </ThemedText>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
 
             <ThemedText type="subtitle">{t('sparring.targetsTitle')}</ThemedText>
             {chips}
@@ -408,6 +499,31 @@ const styles = StyleSheet.create({
   },
   topicChipOn: { backgroundColor: '#208AEF', borderColor: '#208AEF' },
   topicChipOnText: { color: '#fff' },
+  scopeWrap: { gap: 8 },
+  scopeAxisRow: { flexDirection: 'row', gap: 8 },
+  scopeAxisBtn: {
+    flex: 1,
+    minHeight: 40,
+    paddingVertical: 9,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#9ca3af',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scopeChips: { gap: 8, paddingBottom: 2 },
+  scopeChip: {
+    minHeight: 40,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#9ca3af',
+    justifyContent: 'center',
+  },
+  scopeSelected: { backgroundColor: '#208AEF', borderColor: '#208AEF' },
+  scopeText: { fontWeight: '600' },
+  scopeSelectedText: { color: '#fff', fontWeight: '700' },
   primaryBtn: {
     backgroundColor: '#208AEF',
     borderRadius: 12,
