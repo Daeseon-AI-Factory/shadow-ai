@@ -11,6 +11,10 @@ import {
   phrasal500Key,
   COLLOCATIONS,
   collocationKey,
+  IT_TERMS,
+  itTermKey,
+  AI_CODING,
+  aiCodingKey,
   chunkMatcher,
   localToday,
   shuffle,
@@ -38,17 +42,30 @@ type Phase = 'idle' | 'connecting' | 'live' | 'done';
 type Candidate = { key: string; label: string; ko: string };
 type Line = { who: 'me' | 'ai'; text: string };
 
-// Short, sayable chunks only — verb pack, phrasal-500 and collocation anchors. Long IT/pattern
-// sentences make poor conversational targets, so they stay in the drill decks.
-function candidatePool(): Candidate[] {
-  const out: Candidate[] = [];
-  for (const g of VERB_PACK)
-    g.items.forEach((it, i) => out.push({ key: verbKey(g.id, i), label: it.model, ko: it.cue }));
-  PHRASAL_500.forEach((p, i) => out.push({ key: phrasal500Key(i), label: p.phrasal, ko: p.ko }));
-  for (const c of COLLOCATIONS)
-    c.items.forEach((it, i) => out.push({ key: collocationKey(c.id, i), label: c.anchor, ko: c.gloss }));
-  return out;
-}
+// Candidate pools per TOPIC. Scoping a session to one topic keeps the 6 targets in one domain,
+// so the AI weaves them into a single coherent thread instead of hopping (dev terms + phrasals
+// + collocations in one chat feels forced). Long entries are dropped later by chunkMatcher, so a
+// topic auto-keeps only its sayable expressions.
+const verbsPool = (): Candidate[] =>
+  VERB_PACK.flatMap((g) => g.items.map((it, i) => ({ key: verbKey(g.id, i), label: it.model, ko: it.cue })));
+const phrasalPool = (): Candidate[] =>
+  PHRASAL_500.map((p, i) => ({ key: phrasal500Key(i), label: p.phrasal, ko: p.ko }));
+const collocationsPool = (): Candidate[] =>
+  COLLOCATIONS.flatMap((c) => c.items.map((it, i) => ({ key: collocationKey(c.id, i), label: c.anchor, ko: c.gloss })));
+const aiCodingPool = (): Candidate[] => AI_CODING.map((p, i) => ({ key: aiCodingKey(i), label: p.en, ko: p.ko }));
+const itPool = (): Candidate[] => IT_TERMS.map((p, i) => ({ key: itTermKey(i), label: p.en, ko: p.ko }));
+
+type TopicKey = 'due' | 'verbs' | 'phrasal' | 'collocations' | 'aicoding' | 'it';
+const TOPICS: { key: TopicKey; pool: () => Candidate[] }[] = [
+  { key: 'due', pool: () => [...verbsPool(), ...phrasalPool(), ...collocationsPool()] },
+  { key: 'verbs', pool: verbsPool },
+  { key: 'phrasal', pool: phrasalPool },
+  { key: 'collocations', pool: collocationsPool },
+  { key: 'it', pool: itPool },
+  { key: 'aicoding', pool: aiCodingPool },
+];
+const poolFor = (topic: TopicKey): Candidate[] =>
+  (TOPICS.find((tp) => tp.key === topic) ?? TOPICS[0]).pool();
 
 export default function SparringScreen() {
   const token = useAuthStore((s) => s.token);
@@ -58,6 +75,7 @@ export default function SparringScreen() {
   const [hits, setHits] = useState<Set<string>>(new Set());
   const [lines, setLines] = useState<Line[]>([]);
   const [elapsed, setElapsed] = useState(0);
+  const [topic, setTopic] = useState<TopicKey>('due');
   const webRef = useRef<WebView>(null);
   const scrollRef = useRef<ScrollView>(null);
 
@@ -71,7 +89,7 @@ export default function SparringScreen() {
     const byKey = new Map((srs.data as SrsCard[]).map((s) => [s.cardKey, s]));
     const due: Candidate[] = [];
     const known: Candidate[] = [];
-    const all = candidatePool().filter((c) => chunkMatcher(c.label));
+    const all = poolFor(topic).filter((c) => chunkMatcher(c.label));
     for (const c of all) {
       const st = byKey.get(c.key);
       if (!st) continue;
@@ -85,7 +103,7 @@ export default function SparringScreen() {
       );
     }
     return picked.map((c) => ({ ...c, re: chunkMatcher(c.label)! }));
-  }, [srs.data]);
+  }, [srs.data, topic]);
 
   useEffect(() => {
     if (phase !== 'live') return;
@@ -215,6 +233,24 @@ export default function SparringScreen() {
             <ThemedText type="title">{t('sparring.title')}</ThemedText>
             <ThemedText type="small">{t('sparring.subtitle')}</ThemedText>
             {error ? <ThemedText style={styles.error}>{error}</ThemedText> : null}
+
+            <ThemedText type="subtitle">{t('sparring.topicTitle')}</ThemedText>
+            <View style={styles.chips}>
+              {TOPICS.map((tp) => (
+                <Pressable
+                  key={tp.key}
+                  onPress={() => setTopic(tp.key)}
+                  style={[styles.topicChip, topic === tp.key && styles.topicChipOn]}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: topic === tp.key }}
+                >
+                  <ThemedText type="smallBold" style={topic === tp.key ? styles.topicChipOnText : undefined}>
+                    {t(`sparring.topic_${tp.key}`)}
+                  </ThemedText>
+                </Pressable>
+              ))}
+            </View>
+
             <ThemedText type="subtitle">{t('sparring.targetsTitle')}</ThemedText>
             {chips}
             <Pressable style={styles.primaryBtn} onPress={() => start('chat')} accessibilityRole="button">
@@ -304,6 +340,15 @@ const styles = StyleSheet.create({
   },
   chipHit: { backgroundColor: '#16a34a', borderColor: '#16a34a' },
   chipHitText: { color: '#fff' },
+  topicChip: {
+    borderWidth: 1,
+    borderColor: '#8884',
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  topicChipOn: { backgroundColor: '#208AEF', borderColor: '#208AEF' },
+  topicChipOnText: { color: '#fff' },
   primaryBtn: {
     backgroundColor: '#208AEF',
     borderRadius: 12,
