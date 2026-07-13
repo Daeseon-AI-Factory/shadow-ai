@@ -36,11 +36,17 @@ import { t } from '@/lib/i18n';
 // Canadian tech interviewer (the founder's own Canada-job prep, dogfooded).
 
 const TARGET_COUNT = 6;
+const CONNECT_TIMEOUT_MS = 12_000;
 
 type Mode = 'chat' | 'interview';
 type Phase = 'idle' | 'connecting' | 'live' | 'done';
 type Candidate = { key: string; label: string; ko: string };
 type Line = { who: 'me' | 'ai'; text: string };
+
+function logSparringError(context: string, error: unknown) {
+  const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  console.warn(`[sparring] ${context}: ${detail}`);
+}
 
 // Candidate pools per TOPIC. Scoping a session to one topic keeps the 6 targets in one domain,
 // so the AI weaves them into a single coherent thread instead of hopping (dev terms + phrasals
@@ -78,6 +84,7 @@ export default function SparringScreen() {
   const [topic, setTopic] = useState<TopicKey>('due');
   const webRef = useRef<WebView>(null);
   const scrollRef = useRef<ScrollView>(null);
+  const connectAttemptRef = useRef(0);
 
   const srs = useQuery({ queryKey: ['srs'], queryFn: () => practiceApi.srsStates(), enabled: !!token });
 
@@ -111,7 +118,25 @@ export default function SparringScreen() {
     return () => clearInterval(id);
   }, [phase]);
 
+  useEffect(() => {
+    if (phase !== 'connecting') return;
+    const id = setTimeout(() => {
+      logSparringError('connection timed out', `${CONNECT_TIMEOUT_MS}ms`);
+      connectAttemptRef.current += 1;
+      webRef.current?.injectJavaScript('window.stopSparring && window.stopSparring(); true;');
+      setSession(null);
+      setError(t('sparring.errorTimeout'));
+      setPhase('idle');
+    }, CONNECT_TIMEOUT_MS);
+    return () => clearTimeout(id);
+  }, [phase]);
+
+  useEffect(() => {
+    if (srs.error) logSparringError('failed to load SRS targets', srs.error);
+  }, [srs.error]);
+
   const start = async (mode: Mode) => {
+    const attempt = ++connectAttemptRef.current;
     setError(null);
     setPhase('connecting');
     try {
@@ -119,11 +144,22 @@ export default function SparringScreen() {
         mode,
         targets.map(({ label, ko }) => ({ label, ko })),
       );
+      if (connectAttemptRef.current !== attempt) return;
       setSession(minted); // mounts the hidden WebView; onLoadEnd injects the secret
     } catch (e) {
-      setError((e as Error).message);
+      if (connectAttemptRef.current !== attempt) return;
+      logSparringError('failed to mint session', e);
+      setError(t('sparring.errorStart'));
       setPhase('idle');
     }
+  };
+
+  const cancelConnecting = () => {
+    connectAttemptRef.current += 1;
+    webRef.current?.injectJavaScript('window.stopSparring && window.stopSparring(); true;');
+    setSession(null);
+    setError(null);
+    setPhase('idle');
   };
 
   const stop = () => {
@@ -165,8 +201,10 @@ export default function SparringScreen() {
       });
     }
     if (msg.type === 'error') {
-      setError(msg.message ?? 'unknown');
+      logSparringError('WebView bridge error', msg.message ?? 'unknown');
+      setError(t('sparring.errorConnection'));
       if (phase === 'connecting') {
+        connectAttemptRef.current += 1;
         setSession(null);
         setPhase('idle');
       }
@@ -184,7 +222,7 @@ export default function SparringScreen() {
   if (srs.isError) {
     return (
       <ThemedView style={styles.flex}>
-        <ErrorState message={(srs.error as Error).message} onRetry={() => srs.refetch()} />
+        <ErrorState message={t('sparring.errorLoad')} onRetry={() => srs.refetch()} />
       </ThemedView>
     );
   }
@@ -215,6 +253,15 @@ export default function SparringScreen() {
             source={{ uri: `${getApiBaseUrl()}/sparring.html` }}
             style={styles.hiddenWeb}
             onMessage={onMessage}
+            onError={(event) => {
+              logSparringError('WebView load error', event.nativeEvent.description);
+              setError(t('sparring.errorConnection'));
+              if (phase === 'connecting') {
+                connectAttemptRef.current += 1;
+                setSession(null);
+                setPhase('idle');
+              }
+            }}
             onLoadEnd={() =>
               webRef.current?.injectJavaScript(
                 `window.startSparring(${JSON.stringify(session)}); true;`,
@@ -268,6 +315,9 @@ export default function SparringScreen() {
           <View style={styles.center}>
             <ActivityIndicator />
             <ThemedText type="small">{t('sparring.connecting')}</ThemedText>
+            <Pressable style={styles.cancelBtn} onPress={cancelConnecting} accessibilityRole="button">
+              <ThemedText style={styles.cancelText}>{t('sparring.cancel')}</ThemedText>
+            </Pressable>
           </View>
         )}
 
@@ -372,6 +422,17 @@ const styles = StyleSheet.create({
   liveHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   endBtn: { backgroundColor: '#dc2626', borderRadius: 10, paddingVertical: 10, paddingHorizontal: 18 },
   endText: { color: '#fff', fontWeight: '700' },
+  cancelBtn: {
+    borderWidth: 1,
+    borderColor: '#9ca3af',
+    borderRadius: 10,
+    minHeight: 44,
+    paddingVertical: 10,
+    paddingHorizontal: 22,
+    justifyContent: 'center',
+    marginTop: 8,
+  },
+  cancelText: { fontWeight: '700' },
   transcript: { flex: 1 },
   meLine: { color: '#208AEF' },
   error: { color: '#dc2626' },
