@@ -11,6 +11,7 @@ import { SkeletonCards } from '@/components/skeleton';
 import { haptic } from '@/lib/haptics';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { pressableRipple, pressableStyle } from '@/hooks/use-theme';
 import { useAuthStore } from '@/lib/auth-store';
 import { t } from '@/lib/i18n';
 
@@ -181,7 +182,8 @@ export default function ReviewScreen() {
             {finished ? t('review.reviewedCount', { n: total }) : t('review.nothingDueSub')}
           </ThemedText>
           <Pressable
-            style={styles.primaryBtn}
+            style={pressableStyle(styles.primaryBtn)}
+            android_ripple={pressableRipple}
             onPress={() => router.replace('/')}
             accessibilityRole="button"
             accessibilityLabel={t('review.home')}
@@ -189,7 +191,8 @@ export default function ReviewScreen() {
             <ThemedText style={styles.primaryText}>{t('review.home')}</ThemedText>
           </Pressable>
           <Pressable
-            style={styles.doneSecondary}
+            style={pressableStyle(styles.doneSecondary)}
+            android_ripple={pressableRipple}
             onPress={() => router.replace('/practice')}
             accessibilityRole="button"
             accessibilityLabel={t('review.morePractice')}
@@ -229,7 +232,8 @@ export default function ReviewScreen() {
 
           {!revealed ? (
             <Pressable
-              style={styles.primaryBtn}
+              style={pressableStyle(styles.primaryBtn)}
+              android_ripple={pressableRipple}
               onPress={() => setRevealed(true)}
               accessibilityRole="button"
               accessibilityLabel={t('review.reveal')}
@@ -244,7 +248,8 @@ export default function ReviewScreen() {
                 </ThemedText>
               </View>
               <Pressable
-                style={styles.linkBtn}
+                style={pressableStyle(styles.linkBtn)}
+                android_ripple={pressableRipple}
                 onPress={() => router.push(`/player/${clip.id}`)}
                 accessibilityRole="button"
                 accessibilityLabel={t('review.openClip')}
@@ -256,7 +261,8 @@ export default function ReviewScreen() {
                 {GRADES.map((g) => (
                   <Pressable
                     key={g.label}
-                    style={[styles.gradeBtn, { backgroundColor: g.color }]}
+                    style={pressableStyle([styles.gradeBtn, { backgroundColor: g.color }])}
+                    android_ripple={pressableRipple}
                     disabled={respond.isPending || feedbackPending}
                     onPress={() => {
                       submitGrade({

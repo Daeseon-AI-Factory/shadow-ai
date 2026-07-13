@@ -20,6 +20,7 @@ import { ThemedView } from '@/components/themed-view';
 import { EmptyState } from '@/components/empty-state';
 import { ErrorState } from '@/components/error-state';
 import { SkeletonCards } from '@/components/skeleton';
+import { pressableRipple, pressableStyle, useTheme } from '@/hooks/use-theme';
 import { useAuthStore } from '@/lib/auth-store';
 import { t } from '@/lib/i18n';
 
@@ -161,7 +162,8 @@ export default function VideosScreen() {
       <SafeAreaView style={styles.flex} edges={['bottom']}>
         <View style={styles.header}>
           <Pressable
-            style={styles.importBtn}
+            style={pressableStyle(styles.importBtn)}
+            android_ripple={pressableRipple}
             onPress={() => router.push('/import')}
             accessibilityRole="button"
             accessibilityLabel={t('videos.import')}
@@ -207,7 +209,8 @@ export default function VideosScreen() {
             }
             renderItem={({ item }) => (
               <Pressable
-                style={styles.card}
+                style={pressableStyle(styles.card)}
+                android_ripple={pressableRipple}
                 disabled={remove.isPending || feedbackPending}
                 onPress={() => router.push(`/video/${item.video.id}`)}
                 onLongPress={() => confirmRemove(item)}
@@ -261,7 +264,8 @@ function SegmentButton({
 }) {
   return (
     <Pressable
-      style={[styles.segmentItem, active && styles.segmentItemOn]}
+      style={pressableStyle([styles.segmentItem, active && styles.segmentItemOn])}
+      android_ripple={pressableRipple}
       onPress={onPress}
       accessibilityRole="button"
       accessibilityState={{ selected: active }}
@@ -291,15 +295,25 @@ function ClipsPane({
   error: unknown;
   onRefresh: () => void;
 }) {
+  const theme = useTheme();
+
   if (isPending) return <SkeletonCards />;
   if (isError) return <ErrorState message={(error as Error).message} onRetry={onRefresh} />;
 
   return (
     <>
       <TextInput
-        style={styles.search}
+        style={[
+          styles.search,
+          {
+            color: theme.text,
+            backgroundColor: theme.backgroundElement,
+            borderColor: theme.border,
+          },
+        ]}
         placeholder={t('library.searchPlaceholder')}
-        placeholderTextColor="#9ca3af"
+        placeholderTextColor={theme.textSecondary}
+        selectionColor={theme.primary}
         autoCapitalize="none"
         value={query}
         onChangeText={setQuery}
@@ -334,7 +348,8 @@ function ClipsPane({
 function ClipRow({ item }: { item: ClipResponse }) {
   return (
     <Pressable
-      style={styles.clipCard}
+      style={pressableStyle(styles.clipCard)}
+      android_ripple={pressableRipple}
       onPress={() => router.push(`/player/${item.id}`)}
       accessibilityRole="button"
       accessibilityLabel={item.name || item.videoTitle}
@@ -388,13 +403,10 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginBottom: 8,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#9ca3af',
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 10,
     fontSize: 15,
-    color: '#111827',
-    backgroundColor: '#fff',
   },
   list: { padding: 16, gap: 12 },
   card: {

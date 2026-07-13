@@ -19,6 +19,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { ErrorState } from '@/components/error-state';
 import { LineRecorder } from '@/components/line-recorder';
+import { pressableRipple, pressableStyle } from '@/hooks/use-theme';
 import { useAuthStore } from '@/lib/auth-store';
 import { t } from '@/lib/i18n';
 
@@ -328,7 +329,8 @@ export default function VideoDetailScreen() {
         {/* Controls + script-mode toggle */}
         <View style={styles.bar}>
           <Pressable
-            style={styles.playBtn}
+            style={pressableStyle(styles.playBtn)}
+            android_ripple={pressableRipple}
             onPress={() => setPlaying((p) => !p)}
             accessibilityRole="button"
             accessibilityLabel={playing ? t('video.pause') : t('video.play')}
@@ -339,7 +341,8 @@ export default function VideoDetailScreen() {
           </Pressable>
           <View style={styles.toggle}>
             <Pressable
-              style={[styles.toggleItem, mode === 'sentences' && styles.toggleOn]}
+              style={pressableStyle([styles.toggleItem, mode === 'sentences' && styles.toggleOn])}
+              android_ripple={pressableRipple}
               onPress={() => setMode('sentences')}
               accessibilityRole="button"
               accessibilityState={{ selected: mode === 'sentences' }}
@@ -349,7 +352,8 @@ export default function VideoDetailScreen() {
               </ThemedText>
             </Pressable>
             <Pressable
-              style={[styles.toggleItem, mode === 'full' && styles.toggleOn]}
+              style={pressableStyle([styles.toggleItem, mode === 'full' && styles.toggleOn])}
+              android_ripple={pressableRipple}
               onPress={() => setMode('full')}
               accessibilityRole="button"
               accessibilityState={{ selected: mode === 'full' }}
@@ -363,7 +367,8 @@ export default function VideoDetailScreen() {
 
         {/* Advanced controls (speed, A-B range, auto-advance) are tucked behind a toggle. */}
         <Pressable
-          style={styles.advToggle}
+          style={pressableStyle(styles.advToggle)}
+          android_ripple={pressableRipple}
           onPress={() => setShowAdvanced((v) => !v)}
           accessibilityRole="button"
           accessibilityLabel={t('video.advanced')}
@@ -386,7 +391,8 @@ export default function VideoDetailScreen() {
           {[0.5, 0.75, 1, 1.25, 1.5].map((r) => (
             <Pressable
               key={r}
-              style={[styles.speedBtn, rate === r && styles.speedOn]}
+              style={pressableStyle([styles.speedBtn, rate === r && styles.speedOn])}
+              android_ripple={pressableRipple}
               onPress={() => setRate(r)}
               accessibilityRole="button"
               accessibilityState={{ selected: rate === r }}
@@ -401,7 +407,8 @@ export default function VideoDetailScreen() {
         {/* Shadow loop controls: A-B range, auto-advance, reps-per-line */}
         <View style={styles.loopBar}>
           <Pressable
-            style={[styles.loopCtl, arming !== 'none' && styles.loopCtlOn]}
+            style={pressableStyle([styles.loopCtl, arming !== 'none' && styles.loopCtlOn])}
+            android_ripple={pressableRipple}
             onPress={toggleAB}
             accessibilityRole="button"
             accessibilityState={{ selected: arming !== 'none' }}
@@ -411,7 +418,8 @@ export default function VideoDetailScreen() {
             </ThemedText>
           </Pressable>
           <Pressable
-            style={[styles.loopCtl, autoAdvance && styles.loopCtlOn]}
+            style={pressableStyle([styles.loopCtl, autoAdvance && styles.loopCtlOn])}
+            android_ripple={pressableRipple}
             onPress={() => setAutoAdvance((a) => !a)}
             accessibilityRole="button"
             accessibilityState={{ selected: autoAdvance }}
@@ -422,7 +430,8 @@ export default function VideoDetailScreen() {
           </Pressable>
           <View style={styles.repsBox}>
             <Pressable
-              style={styles.repsBtn}
+              style={pressableStyle(styles.repsBtn)}
+              android_ripple={pressableRipple}
               onPress={() => setReps((r) => Math.max(1, r - 1))}
               accessibilityRole="button"
               accessibilityLabel={t('common.decrease')}
@@ -433,7 +442,8 @@ export default function VideoDetailScreen() {
               {t('video.reps', { n: reps })}
             </ThemedText>
             <Pressable
-              style={styles.repsBtn}
+              style={pressableStyle(styles.repsBtn)}
+              android_ripple={pressableRipple}
               onPress={() => setReps((r) => Math.min(9, r + 1))}
               accessibilityRole="button"
               accessibilityLabel={t('common.increase')}
@@ -443,7 +453,8 @@ export default function VideoDetailScreen() {
           </View>
           {loop && (
             <Pressable
-              style={styles.loopCtl}
+              style={pressableStyle(styles.loopCtl)}
+              android_ripple={pressableRipple}
               onPress={() => setLoop(null)}
               accessibilityRole="button"
               accessibilityLabel={t('common.clear')}
@@ -493,7 +504,8 @@ export default function VideoDetailScreen() {
                 ]}
               >
                 <Pressable
-                  style={styles.lineText}
+                  style={pressableStyle(styles.lineText)}
+                  android_ripple={pressableRipple}
                   onPress={() => onLinePress(index)}
                   accessibilityRole="button"
                   accessibilityLabel={item.text}
@@ -504,7 +516,8 @@ export default function VideoDetailScreen() {
                 </Pressable>
                 {focused && (
                   <Pressable
-                    style={styles.clipBtn}
+                    style={pressableStyle(styles.clipBtn)}
+                    android_ripple={pressableRipple}
                     disabled={makeClip.isPending || feedbackPending}
                     onPress={() => submitClip({
                       videoId: id,

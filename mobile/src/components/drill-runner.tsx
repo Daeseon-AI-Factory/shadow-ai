@@ -7,6 +7,7 @@ import { ApiError, localToday, practiceApi } from '@shadow-ai/core';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { pressableRipple, pressableStyle } from '@/hooks/use-theme';
 import { t } from '@/lib/i18n';
 
 const ALERT_REOPEN_DELAY_MS = 350;
@@ -121,7 +122,11 @@ export function DrillRunner({ items, onCheck }: { items: DrillItem[]; onCheck?: 
         <SafeAreaView style={[styles.flex, styles.center]}>
           <ThemedText type="subtitle">{t('drill.allCaughtUp')}</ThemedText>
           <ThemedText type="small">{t('drill.nothingDue')}</ThemedText>
-          <Pressable style={styles.linkBtn} onPress={() => router.back()}>
+          <Pressable
+            style={pressableStyle(styles.linkBtn)}
+            android_ripple={pressableRipple}
+            onPress={() => router.back()}
+          >
             <ThemedText style={styles.linkText}>{t('drill.back')}</ThemedText>
           </Pressable>
         </SafeAreaView>
@@ -165,7 +170,11 @@ export function DrillRunner({ items, onCheck }: { items: DrillItem[]; onCheck?: 
           {streak !== null && (
             <ThemedText type="small">{t('drill.streak', { n: streak })}</ThemedText>
           )}
-          <Pressable style={styles.primaryBtn} onPress={() => router.replace('/')}>
+          <Pressable
+            style={pressableStyle(styles.primaryBtn)}
+            android_ripple={pressableRipple}
+            onPress={() => router.replace('/')}
+          >
             <ThemedText style={styles.primaryText}>{t('drill.home')}</ThemedText>
           </Pressable>
         </SafeAreaView>
@@ -206,7 +215,11 @@ export function DrillRunner({ items, onCheck }: { items: DrillItem[]; onCheck?: 
           {!revealed ? (
             <View style={styles.gap}>
               {onCheck ? <InlineCheck key={item.key} item={item} onCheck={onCheck} /> : null}
-              <Pressable style={styles.primaryBtn} onPress={() => setRevealed(true)}>
+              <Pressable
+                style={pressableStyle(styles.primaryBtn)}
+                android_ripple={pressableRipple}
+                onPress={() => setRevealed(true)}
+              >
                 <ThemedText style={styles.primaryText}>{t('drill.reveal')}</ThemedText>
               </Pressable>
             </View>
@@ -222,14 +235,16 @@ export function DrillRunner({ items, onCheck }: { items: DrillItem[]; onCheck?: 
               </View>
               <View style={styles.row}>
                 <Pressable
-                  style={[styles.gradeBtn, styles.again]}
+                  style={pressableStyle([styles.gradeBtn, styles.again])}
+                  android_ripple={pressableRipple}
                   disabled={grade.isPending || feedbackPending}
                   onPress={() => answer(false)}
                 >
                   <ThemedText style={styles.againText}>{t('drill.again')}</ThemedText>
                 </Pressable>
                 <Pressable
-                  style={[styles.gradeBtn, styles.gotIt]}
+                  style={pressableStyle([styles.gradeBtn, styles.gotIt])}
+                  android_ripple={pressableRipple}
                   disabled={grade.isPending || feedbackPending}
                   onPress={() => answer(true)}
                 >
@@ -272,7 +287,11 @@ function InlineCheck({ item, onCheck }: { item: DrillItem; onCheck: DrillCheck }
         </View>
       ) : null}
       <Pressable
-        style={[styles.checkBtn, (!text.trim() || check.isPending) && styles.disabled]}
+        style={pressableStyle([
+          styles.checkBtn,
+          (!text.trim() || check.isPending) && styles.disabled,
+        ])}
+        android_ripple={pressableRipple}
         disabled={!text.trim() || check.isPending}
         onPress={() => check.mutate()}
       >
