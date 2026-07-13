@@ -1261,3 +1261,143 @@ The SRS itself was fine: `drill-runner.tsx` already calls `practiceApi.grade(key
 
 <!-- override-trigger: 79e8f9a docs(log): realtime voice sparring v1 — WebView bridge decision (048c02e) [no-log] — false positive: this commit IS the log pair for feature commit 048c02e (troubleshooting entry + mdx narrative, both included in it); the keyword "decision" is in the log title, not an unlogged change -->
 <!-- skipped: dc1c646 chore(log): mark 79e8f9a as log-pair commit, trigger false positive [no-log] -->
+
+---
+
+## 2026-07-13 — F5: Claude text completions omitted the prompt-cache marker
+
+**Gap (verified in the pre-change source).** `ClaudeClient.analyzeClip()` marked its stable system
+block for ephemeral caching, but `ClaudeClient.complete()` built the block without that field:
+
+```java
+"system", List.of(Map.of("type", "text", "text", systemPrompt)),
+```
+
+**Cause (verified).** The two methods construct separate Anthropic Messages API request maps, and
+only the `analyzeClip()` map contained `"cache_control", Map.of("type", "ephemeral")`.
+
+**Fix.** `backend/src/main/java/com/tubeshadow/analysis/infrastructure/ClaudeClient.java` now adds
+the same ephemeral marker to `complete()`'s system content block. The new
+`ClaudeClientRequestTest` sends a completion to a local JDK `HttpServer` and inspects the received
+JSON, including system text, user text, token budget, model, and cache-control type. No provider
+request is made by the test. `SPARRING_MODEL` already supported `gpt-realtime-mini` as an environment
+override, so F5 did not change the shared chat/interview fallback model.
+
+**Verification.** `cd backend && ./gradlew test`:
+
+```text
+BUILD SUCCESSFUL in 36s
+4 actionable tasks: 1 executed, 3 up-to-date
+```
+
+**Commit.** This commit; the immutable hash is recorded by Git history.
+
+## 2026-07-13 — F1: mint-only sparring had no server path for an end-of-session report
+
+**Gap (verified).** The F5 commit had no backend route containing `sparring/report`:
+
+```text
+git grep -n 'sparring/report' 7baabac -- backend
+# no matches; exit 1
+```
+
+The realtime bridge sent audio and transcripts between the app and OpenAI, while the backend only
+minted the ephemeral session. It therefore had no learner transcript to summarize after a session.
+
+**Fix.** Added gated, rate-limited `POST /api/practice/sparring/report`, request/response DTOs,
+`CompositionService.sparringReport`, and `SparringReportPrompt`. The client posts learner turns plus
+its own `cardKey`/label targets. The AI sees opaque target IDs; the service requires a complete,
+disjoint used/missed partition and maps IDs back to the original keys. Identical normalized labels
+share one AI classification so separate cards for the same expression cannot be split between used
+and missed. The server does not call `PracticeSrsService` or persist report data.
+
+**Verification.** `cd backend && ./gradlew test --rerun-tasks`:
+
+```text
+BUILD SUCCESSFUL in 3m 27s
+4 actionable tasks: 4 executed
+```
+
+The generated JUnit XML contained no non-zero `failures` or `errors` attribute (`rg` returned no
+matches, exit 1).
+
+**Mobile follow-up (not implemented in this backend commit).** POST a report only after the session
+actually reached `live` and then ended. `connecting` or aborted sessions must send neither a report
+nor grades. For each returned missed target, exclude keys already in the screen's local `hits` set
+(they were already graded `correct:true` live), then call the existing SRS grade endpoint with
+`correct:false`. This avoids promoting and immediately resetting the same card in one session.
+
+**Commit.** This commit; the immutable hash is recorded by Git history.
+
+---
+
+## 2026-07-13 — F2: mock interviews could not receive a job description
+
+**Gap (verified).** The F1 commit had no backend `jobDescription` field or call-chain reference:
+
+```text
+git grep -n 'jobDescription' 0681bb5 -- backend
+# no matches; exit 1
+```
+
+`MockNextRequest` carried only history and seed, so `PracticeController`, `CompositionService`, and
+`MockInterviewPrompt.userMessage` had no role-specific data to use.
+
+**Fix.** Added optional `jobDescription` (maximum 12,000 characters) and threaded it through the
+existing call chain. A nonblank JD is prepended to the user message as delimited untrusted role data;
+the fixed `MockInterviewPrompt.SYSTEM` and strict `{"question": ...}` response contract are unchanged.
+The reserved boundary strings are removed from JD data, null history elements return 400, and a
+null/blank JD produces the previous prompt text exactly.
+
+**Verification.** `cd backend && ./gradlew test --rerun-tasks`:
+
+```text
+BUILD SUCCESSFUL in 2m 25s
+4 actionable tasks: 4 executed
+```
+
+The generated JUnit XML contained no non-zero `failures` or `errors` attribute (`rg` returned no
+matches, exit 1). Tests verify request validation, unchanged no-JD text, JD threading, sentinel
+sanitization, and the existing question parser. They use a mocked provider; whether a live model
+actually produces stack-specific questions is unverified.
+
+**Client follow-up (not implemented in this backend commit).** Add an optional JD paste field on the
+mock-interview screen and include the same `jobDescription` value on every `/interview/mock` request
+in the session, not only the opener.
+
+**Commit.** This commit; the immutable hash is recorded by Git history.
+
+---
+
+## 2026-07-13 — F6: AI routes did not enforce the existing paid-plan entitlement
+
+**Gap (verified against `origin/main` at `3c10afc`).** `User.effectivePlan(now)` existed, but
+`AiGate.java` did not and `PracticeController` contained no `assertEntitled` call. The existing
+realtime `SparringClient` was already mint-only and contained no authorization gate. Therefore all
+eleven AI-backed practice routes lacked plan enforcement.
+
+**Fix.** `AiGate.assertEntitled(userId)` now loads the current `User` from `UserRepository` and
+allows a request when `effectivePlan(Instant.now(clock))` is not `free`. The existing
+`AI_ALLOWED_EMAILS` value remains a case-insensitive owner/tester override based on the current DB
+email. Missing users, free plans, and expired paid plans fail closed with `403 AI_NOT_ALLOWED`.
+All eleven AI-backed controller entry points now pass the authenticated user ID to this single gate,
+including both realtime session minting and the F1 sparring-report endpoint. `SparringClient`
+remains mint-only; authorization is enforced at the controller boundary before it is called.
+
+No credit ledger, entity, repository, or Flyway migration was added. Boolean plan enforcement uses
+the existing user-plan columns and `effectivePlan` behavior.
+
+**Verification.** `cd backend && ./gradlew --no-daemon test --rerun-tasks`:
+
+```text
+BUILD SUCCESSFUL in 32s
+4 actionable tasks: 4 executed
+```
+
+The generated JUnit XML contained no non-zero `failures` or `errors` attribute (`rg` returned no
+matches, exit 1). Tests cover free, active paid, non-expiring paid, expired paid, allowlisted free,
+missing-user, and null-ID gate behavior, plus UUID-gate use by a general AI endpoint and realtime
+sparring. No live billing webhook or paid external-model request was made, so deployed entitlement
+and provider behavior remain unverified.
+
+**Commit.** This commit; the immutable hash is recorded by Git history.

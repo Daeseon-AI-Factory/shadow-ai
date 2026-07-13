@@ -1,0 +1,35 @@
+---
+title: "F5 — Claude text completions carry the prompt-cache marker"
+date: "2026-07-13"
+project: "shadow-ai"
+kind: "monetization"
+visibility: "private"
+language: "en"
+summary: "Claude text completions now mark the stable system block for ephemeral prompt caching, with the outgoing JSON verified against a local HTTP server."
+tags: ["backend", "anthropic", "prompt-caching", "cost-control"]
+---
+
+## What changed
+
+`ClaudeClient.analyzeClip()` already sent its system prompt as a structured Anthropic text block
+with `cache_control: {type: "ephemeral"}`. The general `complete()` path used by composition,
+mock-interview, and report prompts built a separate request and omitted that marker. F5 gives both
+paths the same system-block shape.
+
+The realtime model remains configurable through the existing `SPARRING_MODEL` environment
+override. Its fallback was not changed: one `tubeshadow.sparring.model` value currently drives both
+casual chat and interview sessions, so changing the fallback to mini would alter both modes rather
+than route casual chat alone.
+
+## Verification boundary
+
+A new local-server test captures the real JSON emitted by `ClaudeClient.complete()` and checks the
+model, output-token budget, stable system text, variable user text, and ephemeral cache marker.
+
+```text
+BUILD SUCCESSFUL in 36s
+4 actionable tasks: 1 executed, 3 up-to-date
+```
+
+No live Anthropic or OpenAI request was made. Cache hits, billed tokens, realtime-mini voice quality,
+and production cost changes remain unverified.
