@@ -102,6 +102,31 @@ class PracticeControllerTest extends SpringIntegrationTest {
                 .andExpect(jsonPath("$.data.streak").value(0));
     }
 
+    @Test
+    void mockInterviewRejectsAnOversizedJobDescriptionBeforeTheAiGate() throws Exception {
+        String token = signupAndLogin("mock-jd-too-long@example.com");
+        String body = objectMapper.writeValueAsString(Map.of(
+                "history", java.util.List.of(),
+                "seed", 42,
+                "jobDescription", "x".repeat(12001)));
+
+        mockMvc.perform(post("/api/practice/interview/mock")
+                        .contentType(MediaType.APPLICATION_JSON).content(body)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void mockInterviewRejectsANullHistoryTurnBeforeTheAiGate() throws Exception {
+        String token = signupAndLogin("mock-null-turn@example.com");
+
+        mockMvc.perform(post("/api/practice/interview/mock")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"history\":[null],\"seed\":42}")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isBadRequest());
+    }
+
     private org.springframework.test.web.servlet.ResultActions rep(String token, String localDate) throws Exception {
         String body = objectMapper.writeValueAsString(Map.of("localDate", localDate));
         return mockMvc.perform(post("/api/practice/rep")

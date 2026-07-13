@@ -1,0 +1,44 @@
+---
+title: "F2 — Threading a job description through the mock-interview backend"
+date: "2026-07-13"
+project: "shadow-ai"
+kind: "update"
+visibility: "public"
+language: "en"
+summary: "Mock-interview requests can now carry an optional, capped job description while preserving the existing no-JD prompt and strict question response contract."
+tags: ["backend", "interview", "prompting", "validation"]
+---
+
+## What changed
+
+`MockNextRequest` now accepts an optional `jobDescription`, capped at 12,000 characters. The value is
+threaded through `PracticeController` and `CompositionService` into
+`MockInterviewPrompt.userMessage(history, seed, jobDescription)`.
+
+When present, the role text is placed before the session seed in a clearly delimited untrusted-data
+section. The two reserved boundary strings are removed from the data so a pasted JD cannot spoof the
+closing marker. `MockInterviewPrompt.SYSTEM` remains byte-for-byte unchanged, and the response is
+still strict JSON containing only `question`.
+
+Null or blank JD values produce the previous user message exactly. The request also now rejects null
+history elements instead of allowing a controller dereference.
+
+## Client follow-up
+
+The interview screen still needs an optional JD paste field. It should retain that text for the
+session and send `jobDescription` on every mock-next call, including follow-ups; sending it only for
+the opening question would make later turns lose the role context. No mobile files were changed here.
+
+## Verification boundary
+
+The full backend suite was forced to rerun:
+
+```text
+BUILD SUCCESSFUL in 2m 25s
+4 actionable tasks: 4 executed
+```
+
+Automated tests cover the size cap, null history elements, exact no-JD compatibility, JD placement,
+boundary-marker sanitization, service threading, and parser behavior. The service test stubs a
+Kotlin-specific question; no live provider call was made, so actual stack-tailored question quality
+is unverified.

@@ -5,11 +5,13 @@ import com.tubeshadow.analysis.infrastructure.AiAnalysisClient;
 import com.tubeshadow.common.exception.BusinessException;
 import com.tubeshadow.practice.api.dto.ComposeFeedback;
 import com.tubeshadow.practice.api.dto.MixResponse;
+import com.tubeshadow.practice.api.dto.MockNextResponse;
 import com.tubeshadow.practice.api.dto.StoryResponse;
 import com.tubeshadow.practice.api.dto.SparringReportRequest;
 import com.tubeshadow.practice.api.dto.SparringReportResponse;
 import com.tubeshadow.practice.application.CompositionService;
 import com.tubeshadow.practice.prompt.SparringReportPrompt;
+import com.tubeshadow.practice.prompt.MockInterviewPrompt;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -218,5 +220,32 @@ class CompositionServiceTest {
         ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
         verify(ai).complete(eq(SparringReportPrompt.SYSTEM), prompt.capture(), eq(800));
         assertThat(prompt.getValue()).contains("t1 | agree with").doesNotContain("t2 |");
+    }
+
+    @Test
+    void mockInterviewThreadsTheJobDescriptionIntoTheUserPrompt() {
+        when(ai.isConfigured()).thenReturn(true);
+        when(ai.complete(anyString(), anyString())).thenReturn(
+                "{\"question\":\"How would you make a Kotlin service idempotent?\"}");
+
+        MockNextResponse response = service.mockNext(
+                List.of(), 42L, "Backend engineer: Kotlin, queues, and idempotent APIs.");
+
+        assertThat(response.question()).isEqualTo("How would you make a Kotlin service idempotent?");
+        ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
+        verify(ai).complete(eq(MockInterviewPrompt.SYSTEM), prompt.capture());
+        assertThat(prompt.getValue()).contains(
+                "The role:",
+                "Backend engineer: Kotlin, queues, and idempotent APIs.",
+                "Session seed: 42");
+    }
+
+    @Test
+    void mockInterviewStillRejectsAnEmptyQuestion() {
+        when(ai.isConfigured()).thenReturn(true);
+        when(ai.complete(anyString(), anyString())).thenReturn("{\"question\":\"\"}");
+
+        assertThatThrownBy(() -> service.mockNext(List.of(), 42L, null))
+                .isInstanceOf(BusinessException.class);
     }
 }

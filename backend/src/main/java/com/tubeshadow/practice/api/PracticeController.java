@@ -164,7 +164,8 @@ public class PracticeController {
                     .map(h -> new MockInterviewPrompt.Turn(h.role(), h.text()))
                     .toList();
         long seed = request.seed() != null ? request.seed() : System.nanoTime();
-        return ApiResponse.ok(compositionService.mockNext(turns, seed));
+        aiGate.assertAllowed(user.email());
+        return ApiResponse.ok(compositionService.mockNext(turns, seed, request.jobDescription()));
     }
 
     @PostMapping("/interview/check")
