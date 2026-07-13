@@ -1427,3 +1427,28 @@ $ git diff --check
 ```
 
 **Commit.** `abfe172`
+
+---
+
+## 2026-07-13 — 낮은 box의 미도래 표현을 스파링에서 집중 선택할 수 없음
+
+**Symptom (코드 감사).** 기존 선택기는 미래 예정 카드를 box 숙련도와 무관하게 하나의 `known` 배열로 섞었다. 신규 카드는 타깃 수가 부족할 때만 뒤에서 보충됐다.
+
+```tsx
+(st.dueDate <= today ? due : known).push(c);
+let picked = [...shuffle(due), ...shuffle(known)].slice(0, TARGET_COUNT);
+```
+
+**Cause (검증됨).** `SrsCard`에는 `box`와 `correctCount`가 있지만 선택 로직은 `dueDate`만 분기했다. 생성 시각 필드는 없으므로 실제 "최근 추가 순"은 계산할 수 없다.
+
+**Fix.** `packages/core/src/practice-srs.ts`에 `partitionLearning`을 추가했다. `box <= 1 && dueDate > today`인 카드를 box→정답 횟수→원본 순서로 정렬하고, 상태가 없는 fresh 카드를 별도로 반환한다. `mobile/src/app/sparring.tsx`의 신규 학습 표현 모드는 이 learning 목록을 먼저 쓰고 fresh로 여섯 자리를 채운다. 기존 due 분기는 그대로 유지했다.
+
+**검증 (함수 수준).** 실제 helper import로 경계·정렬·동률·fresh·입력 불변성을 검사했고 모바일 타입 검사도 통과했다.
+
+```text
+partitionLearning checks: ordering, boundaries, fresh, stable ties, input immutability passed
+$ cd mobile && npx tsc --noEmit
+(no stdout; exit 0)
+```
+
+**Commit.** `90d9206`
