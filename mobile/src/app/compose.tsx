@@ -10,7 +10,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Redirect } from 'expo-router';
+import { Redirect, router } from 'expo-router';
 import { useMutation } from '@tanstack/react-query';
 import { COLLOCATIONS, practiceApi, ApiError } from '@shadow-ai/core';
 
@@ -39,14 +39,44 @@ export default function ComposeScreen() {
   if (!token) return <Redirect href="/login" />;
 
   const fb = check.data;
-  const errorMessage =
-    check.error instanceof ApiError ? check.error.message : check.error ? t('compose.checkFailed') : null;
+  const inviteOnly =
+    check.error instanceof ApiError &&
+    check.error.status === 403 &&
+    check.error.code === 'AI_NOT_ALLOWED';
+  const errorMessage = check.error && !inviteOnly ? t('compose.checkFailed') : null;
 
   const next = () => {
     setIdx(pickIndex());
     setText('');
     check.reset();
   };
+
+  if (inviteOnly) {
+    return (
+      <ThemedView style={styles.flex}>
+        <SafeAreaView style={styles.flex}>
+          <View style={styles.inviteScreen}>
+            <View style={styles.inviteCard}>
+              <ThemedText style={styles.inviteIcon}>🔒</ThemedText>
+              <ThemedText type="title" style={styles.inviteTitle}>
+                {t('aiInvite.title')}
+              </ThemedText>
+              <ThemedText type="small" style={styles.inviteBody}>
+                {t('aiInvite.body')}
+              </ThemedText>
+              <Pressable
+                style={styles.inviteButton}
+                onPress={() => router.replace('/practice')}
+                accessibilityRole="button"
+              >
+                <ThemedText style={styles.inviteButtonText}>{t('aiInvite.freePractice')}</ThemedText>
+              </Pressable>
+            </View>
+          </View>
+        </SafeAreaView>
+      </ThemedView>
+    );
+  }
 
   return (
     <ThemedView style={styles.flex}>
@@ -141,6 +171,30 @@ const styles = StyleSheet.create({
   fbOk: { borderColor: '#10b98155', backgroundColor: '#10b98111' },
   fbWork: { borderColor: '#f59e0b55', backgroundColor: '#f59e0b11' },
   better: { fontStyle: 'italic' },
+  inviteScreen: { flex: 1, justifyContent: 'center', padding: 24 },
+  inviteCard: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#f59e0b88',
+    backgroundColor: '#f59e0b12',
+    borderRadius: 18,
+    padding: 24,
+    alignItems: 'center',
+    gap: 12,
+  },
+  inviteIcon: { fontSize: 34 },
+  inviteTitle: { textAlign: 'center' },
+  inviteBody: { textAlign: 'center', lineHeight: 20 },
+  inviteButton: {
+    alignSelf: 'stretch',
+    minHeight: 48,
+    borderRadius: 12,
+    backgroundColor: '#208AEF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    marginTop: 4,
+  },
+  inviteButtonText: { color: '#fff', fontWeight: '700' },
   row: { flexDirection: 'row', gap: 12, marginTop: 4 },
   primaryBtn: {
     flex: 1,
