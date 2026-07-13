@@ -120,7 +120,10 @@ public class ClaudeClient implements AiAnalysisClient {
         Map<String, Object> body = Map.of(
                 "model", props.model(),
                 "max_tokens", maxTokens,
-                "system", List.of(Map.of("type", "text", "text", systemPrompt)),
+                "system", List.of(Map.of(
+                        "type", "text",
+                        "text", systemPrompt,
+                        "cache_control", Map.of("type", "ephemeral"))),
                 "messages", List.of(Map.of(
                         "role", "user",
                         "content", List.of(Map.of("type", "text", "text", userPrompt))))
