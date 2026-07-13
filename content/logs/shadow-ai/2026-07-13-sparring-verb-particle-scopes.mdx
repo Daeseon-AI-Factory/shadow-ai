@@ -1,11 +1,11 @@
 ---
-title: "기본 동사 스파링을 한 축으로 — 동사별·파티클별 하위 범위"
+title: "기본 동사 스파링을 한 축으로 — 동사별·파티클·전치사별 하위 범위"
 date: "2026-07-13"
 project: "shadow-ai"
 kind: "update"
 visibility: "public"
 language: "ko"
-summary: "기본 동사 스파링에서 put/take/get 같은 동사 그룹이나 up/off/out 같은 파티클 family 하나만 골라 대화 타깃을 만들 수 있게 했다. 선택 범위 밖 카드는 보충하지 않는다."
+summary: "기본 동사 스파링에서 put/take/get 같은 동사 그룹이나 to/in/with/up/out 같은 파티클·전치사 하나만 골라 대화 타깃을 만들 수 있게 했다. 선택 범위 밖 카드는 보충하지 않는다."
 tags: ["sparring", "verbs", "particles", "expo"]
 ---
 
@@ -17,27 +17,33 @@ tags: ["sparring", "verbs", "particles", "expo"]
 ## 이미 있던 축
 
 새 분류를 추측해 만들 필요는 없었다. `VERB_PACK`에는 103개 동사 그룹이 있고,
-`PARTICLE_FAMILIES`에는 신뢰 가능한 25개 adverb-particle family가 실제 SRS 카드키로
-연결돼 있었다. 검사 결과 family가 가리키는 누락 카드키는 0개였다. 별도 `PHRASAL_500`은
-동사/파티클 메타데이터가 없으므로 문자열을 잘라 억지 분류하지 않았다.
+`verbs.tsx`의 축 picker는 `PARTICLE_INFO[key].particle`에 담긴 파티클·전치사 태그를 쓴다.
+기본 동사 원본 1,956개 중 chunk-matchable 카드 1,935개를 같은 기준으로 집계하면 104개
+하위 그룹이 나온다.
+초기 구현에 썼던 `PARTICLE_FAMILIES`는 25개 adverb family만 포함해 실제 picker 축보다
+좁았으므로 후속 코드 감사에서 교체했다. 별도 `PHRASAL_500`은 이 메타데이터가 없으므로
+문자열을 잘라 억지 분류하지 않았다.
 
 ## 구현
 
-기본 동사 토픽을 선택하면 **동사별 / 파티클별** 축이 나타난다. 동사 축은 put/take/get
-등의 `VERB_PACK` 그룹을, 파티클 축은 up/off/out 등의 `PARTICLE_FAMILIES`를 가로 칩으로
-보여 준다. 선택한 그룹으로 `poolFor`를 먼저 좁힌 다음 기존 due 우선·fresh 보충 로직을
-적용한다. 따라서 타깃이 부족해도 다른 그룹에서 몰래 채우지 않는다.
+기본 동사 토픽을 선택하면 **동사별 / 파티클·전치사별** 축이 나타난다. 동사 축은
+put/take/get 등의 `VERB_PACK` 그룹을, 두 번째 축은 to/in/with/up/out 등의
+`PARTICLE_INFO` 태그를 가로 칩으로 보여 준다. 선택한 그룹으로 `poolFor`를 먼저 좁힌 다음
+기존 due 우선·fresh 보충 로직을 적용한다. 따라서 타깃이 부족해도 다른 그룹에서 몰래
+채우지 않는다.
 
 ## 검증 범위
 
-실제 데이터로 get/take/put의 모든 키가 선택한 verb prefix 안에 있고, out/up/off의 모든
-키가 선택한 family 집합 안에 있는지 assertion으로 확인했다.
+실제 데이터에서 동사 그룹 수, chunk-matchable 카드 수, 파티클·전치사 그룹 수를 집계하고
+to/in/with 같은 전치사 예시가 실제 후보 풀에 남는지 assertion으로 확인했다.
 
 ```text
-F4 scope checks: get/take/put and out/up/off contain only selected-group keys
+F4 scope audit passed: verbGroups=103 rawCards=1956 matchableCards=1935 particleGroups=104 top=to:154,out:140,up:140 prepExamples=to:154,in:135,with:84
 ```
 
-`cd mobile && npx tsc --noEmit`은 출력 없이 exit 0이었다. 실제 iOS 화면에서 축과 그룹을
-눌러 타깃이 바뀌는 흐름은 최종 개발 빌드 검증에 남겨 뒀다.
+`cd mobile && npx tsc --noEmit`은 출력 없이 exit 0이었다. iPhone 17 Pro(iOS 26.5)에서
+`GET · 42`를 고르면 `get up`이 보이고 take/put/give 타깃은 보이지 않았다. 파티클·전치사
+축에서 `to · 154`가 실제로 표시됐고, `out · 140`을 고르면 `take out`만 남고
+get/put/give 타깃은 보이지 않았다. Maestro flow는 exit 0이었다.
 
-구현 커밋: `dc1fd68`.
+구현 커밋: `dc1fd68`; `PARTICLE_INFO` 축 교정: `f9ef2c4`.

@@ -33,10 +33,12 @@ Node 24로 실제 TypeScript helper를 import해 낮은 box 우선순위, 오늘
 fresh 보충, 동률 원본 순서, 입력 불변성을 assertion으로 확인했다. 출력은 다음과 같았다.
 
 ```text
-partitionLearning checks: ordering, boundaries, fresh, stable ties, input immutability passed
+partitionLearning checks passed: low-box order, due boundaries, fresh, stable ties, immutability
 ```
 
-`cd mobile && npx tsc --noEmit`도 출력 없이 exit 0이었다. 실제 화면에서 선택한 모드가
-서버 SRS 데이터와 함께 표시되는지는 최종 iOS 개발 빌드에서 별도 확인한다.
+`cd mobile && npx tsc --noEmit`도 출력 없이 exit 0이었다. iPhone 17 Pro(iOS 26.5)의
+local mock UI에서는 learning을 고르면 저-box/미도래 `take out`, `get up`이 보이고,
+overdue `put on`과 box-2 `give up`은 보이지 않았다. 다시 기본 due 모드로 진입하면 overdue
+`put on`이 계속 보였다. 두 Maestro flow는 exit 0이었다.
 
 구현 커밋: `90d9206`.

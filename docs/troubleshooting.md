@@ -1415,18 +1415,21 @@ setError(msg.message ?? 'unknown');
 
 **Cause (검증됨).** 변경 전 연결 단계에는 `setTimeout`과 Cancel 동작이 없었다. mint가 끝난 뒤 WebView의 `connected` 메시지가 오지 않으면 `phase === 'connecting'`이 계속 유지됐고, 늦게 끝난 mint 요청을 무효화하는 시도 식별자도 없었다.
 
-**Fix.** `mobile/src/app/sparring.tsx`에 12,000ms 연결 상한, 명시적 Cancel, 늦은 mint 응답 무효화, WebView load/bridge 오류 처리, 타이머 cleanup을 추가했다. 원문은 `[sparring]` 경고 로그로 남기고 사용자에게는 `mobile/src/lib/i18n-messages.ts`의 영어/한국어 복구 문구만 표시한다.
+**Fix.** `mobile/src/app/sparring.tsx`에 12,000ms 연결 상한, 명시적 Cancel, 늦은 mint 응답 무효화, WebView load/bridge 오류 처리, 타이머 cleanup을 추가했다. 후속 코드 감사에서는 mint뿐 아니라 이미 mount된 WebView가 취소 뒤 늦게 `connected`를 보낼 수 있는 경로와 정확히 12초 경계의 timer/message 경쟁도 확인했다. WebView를 시도 ID로 keying하고 message/load/error callback이 현재 시도와 일치할 때만 상태를 바꾸며, 성공·취소·오류는 timer ref를 동기적으로 해제한다. 원문은 `[sparring]` 경고 로그로 남기고 사용자에게는 `mobile/src/lib/i18n-messages.ts`의 영어/한국어 복구 문구만 표시한다.
 
-**검증 (함수 수준: 정적/타입).** 아래 명령은 둘 다 exit 0이었다. 실제 iOS WebView 강제 종료와 Cancel 탭 흐름은 아직 실행하지 않았다.
+**검증 (함수 + iOS 흐름).** 타입/diff 검사는 exit 0이었다. iPhone 17 Pro(iOS 26.5) 시뮬레이터와 로컬 mock에서 mint는 성공하지만 WebView가 `connected`를 보내지 않는 hang을 만들었다. Cancel은 Connecting에서 즉시 Topic 화면으로 복귀했고, 재시도는 12초 상한 뒤 아래 문구로 복귀했다. `connected` mock은 live→report까지 진행됐다. 실제 WebView 프로세스를 강제 종료한 검증은 아니며, 결정적인 no-message 경로를 mock으로 대체했다.
 
 ```text
 $ cd mobile && npx tsc --noEmit
 (no stdout; exit 0)
 $ git diff --check
 (no stdout; exit 0)
+Maestro L5 Cancel: Connecting → Cancel → Topic; COMPLETED
+Maestro L5 timeout: "That took too long. Check your connection and try again."; COMPLETED
+Maestro L5 connect: live hint → End → Session report; COMPLETED
 ```
 
-**Commit.** `abfe172`
+**Commits.** `abfe172`, 후속 경합 방어 `f9ef2c4`
 
 ---
 
@@ -1446,9 +1449,11 @@ let picked = [...shuffle(due), ...shuffle(known)].slice(0, TARGET_COUNT);
 **검증 (함수 수준).** 실제 helper import로 경계·정렬·동률·fresh·입력 불변성을 검사했고 모바일 타입 검사도 통과했다.
 
 ```text
-partitionLearning checks: ordering, boundaries, fresh, stable ties, input immutability passed
+partitionLearning checks passed: low-box order, due boundaries, fresh, stable ties, immutability
 $ cd mobile && npx tsc --noEmit
 (no stdout; exit 0)
+Maestro F3 learning: take out/get up visible; overdue put on and box-2 give up hidden; COMPLETED
+Maestro F3 due: overdue put on visible; COMPLETED
 ```
 
 **Commit.** `90d9206`
@@ -1464,19 +1469,39 @@ const poolFor = (topic: TopicKey): Candidate[] =>
   (TOPICS.find((tp) => tp.key === topic) ?? TOPICS[0]).pool();
 ```
 
-**Cause (검증됨).** 동사 그룹은 `VERB_PACK`, 파티클별 카드키는 `PARTICLE_FAMILIES`에 이미 있었지만 스파링 풀과 선택 UI가 이 분류를 사용하지 않았다. 데이터 검사 결과 동사 그룹 103개, 파티클 family 25개였고 family의 누락 카드키는 0개였다.
+**Cause (검증됨).** 동사 그룹은 `VERB_PACK`, `verbs.tsx`가 실제 축 picker에 쓰는 파티클/전치사 태그는 `PARTICLE_INFO[key].particle`에 이미 있었지만 스파링 풀과 선택 UI가 이 분류를 사용하지 않았다. 초기 구현은 더 좁은 `PARTICLE_FAMILIES`(25개 adverb family)를 사용해 `verbs.tsx`의 축과 불일치했다. 실제 데이터 감사 결과 기본 동사 원본은 1,956개, chunk-matchable 카드는 1,935개이고, `PARTICLE_INFO` 기준 하위 그룹은 104개였다.
 
-**Fix.** `mobile/src/app/sparring.tsx`의 기본 동사 토픽에 동사별/파티클별 축과 가로 그룹 picker를 추가했다. `poolFor(topic, scopeAxis, scopePick)`은 선택한 verb ID 또는 `PARTICLE_FAMILIES` 카드키만 반환한다. 이후 due/known/fresh 보충도 이 scoped 배열 안에서만 수행하므로 다른 그룹 타깃을 섞지 않는다. 영어/한국어 축 문구는 `mobile/src/lib/i18n-messages.ts`에 추가했다.
+**Fix.** `mobile/src/app/sparring.tsx`의 기본 동사 토픽에 동사별/파티클·전치사별 축과 가로 그룹 picker를 추가했다. `poolFor(topic, scopeAxis, scopePick)`은 선택한 verb ID 또는 정확히 일치하는 `PARTICLE_INFO` 태그만 반환한다. 이후 due/known/fresh 보충도 이 scoped 배열 안에서만 수행하므로 다른 그룹 타깃을 섞지 않는다. 영어/한국어 축 문구는 `mobile/src/lib/i18n-messages.ts`에 추가했다.
 
 **검증 (함수 수준: 데이터/정적/타입).**
 
 ```text
-F4 data checks: verbGroups=103 particleFamilies=25 missingKeys=0 get=42 take=31 put=25
-F4 scope checks: get/take/put and out/up/off contain only selected-group keys
+F4 scope audit passed: verbGroups=103 rawCards=1956 matchableCards=1935 particleGroups=104 top=to:154,out:140,up:140 prepExamples=to:154,in:135,with:84
 $ cd mobile && npx tsc --noEmit
 (no stdout; exit 0)
 ```
 
-실제 iOS picker 조작은 아직 실행하지 않았다.
+실제 iPhone 17 Pro(iOS 26.5) picker에서도 `GET · 42` 선택 시 `get up`만 남고 take/put/give 타깃은 보이지 않았다. 파티클·전치사 축의 `out · 140` 선택 시 `take out`만 남고 get/put/give 타깃은 보이지 않았다. 두 Maestro flow는 exit 0이었다.
 
-**Commit.** `dc1fd68`
+**Commits.** `dc1fd68`, `PARTICLE_INFO` 축 교정 `f9ef2c4`
+
+---
+
+## 2026-07-13 — 스파링 403이 초대제 안내 대신 서버 원문을 노출함
+
+**Symptom (검증됨).** API client는 이미 `status`와 `code`를 가진 `ApiError`를 export하지만, 스파링 시작 실패는 모든 오류를 하나의 일반 문구로 처리했다. 백엔드 소스에서 AI gate는 `403 AI_NOT_ALLOWED`, 스파링 gate는 `403 SPARRING_NOT_ALLOWED`를 반환한다. compose 화면은 아직 `ApiError.message`를 직접 표시하지만, 이번 트랙의 허용 파일 목록과 “mutation 화면 금지” 규칙 때문에 수정하지 않았다.
+
+**Fix.** 스파링은 두 403 code만 초대제 상태로 분기한다. 서버 원문은 `[sparring]` 개발 로그에만 남기고, 화면에는 지역화된 초대제 설명과 비용 없는 `/practice` 복귀 버튼을 표시한다. 저장소에는 실제 waitlist route/API가 없어서 동작하지 않는 “대기 신청” 버튼은 만들지 않았다. 다른 status/code는 기존 친절한 재시도 오류를 유지한다. 공용 `ApiError` 형태가 이미 충분해 Track A 소유의 `packages/core/src/api/client.ts`는 수정하지 않았다.
+
+**검증 (iOS 흐름).** 로컬 mock이 raw marker를 포함한 두 403을 각각 반환하도록 했다. iPhone 17 Pro(iOS 26.5)에서 두 경우 모두 초대제 panel과 “Continue with free practice”가 보였고 raw marker와 Connecting은 보이지 않았다. 무료 연습 버튼은 Practice 화면의 Live sparring 카드로 이동했다.
+
+```text
+SPARRING_NOT_ALLOWED: invite panel visible; RAW_SPARRING_NOT_ALLOWED_DO_NOT_SHOW hidden; COMPLETED
+AI_NOT_ALLOWED: invite panel visible; RAW_AI_NOT_ALLOWED_DO_NOT_SHOW hidden; COMPLETED
+$ cd mobile && npx tsc --noEmit
+(no stdout; exit 0)
+```
+
+**Known gap.** L3 전체 backlog의 compose 경로와 실제 대기 신청 동작은 범위 승인/목적지 결정이 필요하다. Android UI는 실행하지 않았다.
+
+**Commit.** `f9ef2c4`
