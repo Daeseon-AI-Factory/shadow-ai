@@ -1,0 +1,51 @@
+---
+title: "F1 — A read-only sparring report that preserves client-owned SRS keys"
+date: "2026-07-13"
+project: "shadow-ai"
+kind: "update"
+visibility: "public"
+language: "en"
+summary: "The backend can now analyze a client-posted learner transcript into used targets, misses, corrections, and recurring mistakes without guessing or mutating client-owned SRS state."
+tags: ["backend", "sparring", "srs", "prompting"]
+---
+
+## The boundary
+
+Realtime sparring is mint-only on the server: audio and transcripts travel between the mobile
+WebView and OpenAI. The new `POST /api/practice/sparring/report` therefore receives the learner's
+completed user turns from the client. It does not attempt to observe an in-flight session.
+
+The request also carries each target's client-owned `cardKey`, label, and gloss. The model never sees
+the key. The backend assigns opaque IDs (`t1`, `t2`, ...), demands a complete used/missed partition,
+and maps those IDs back to the original target records. Repeated normalized labels share one opaque
+ID so two cards for `agree with` cannot receive contradictory classifications.
+
+The response contains used targets, missed targets, corrections, and recurring mistakes. The server
+does not write SRS rows; that avoids deriving app key formats or grading a card without the client's
+session state.
+
+## Mobile follow-up
+
+The mobile track still needs to:
+
+1. POST only after a session reached `live` and ended; send nothing for `connecting` or aborted runs.
+2. Send learner turns plus the session targets including their `cardKey` values.
+3. Remove keys already present in the screen's `hits` set from the returned misses, because those keys
+   were already graded `correct:true` during the live transcript callback.
+4. Submit `correct:false` through the existing SRS grade endpoint for each remaining missed key.
+
+That wiring was intentionally not added in this backend-owned commit. A missed target becoming due in
+the next client session and the aborted-session behavior are therefore not product-verified here.
+
+## Verification
+
+The endpoint gate, request validation (including null target elements), strict response parsing,
+duplicate-label grouping, card-key mapping, prompt boundary, and no-provider path have automated
+coverage. The full backend suite was forced to rerun:
+
+```text
+BUILD SUCCESSFUL in 3m 27s
+4 actionable tasks: 4 executed
+```
+
+No live model request or mobile end-to-end session was run.

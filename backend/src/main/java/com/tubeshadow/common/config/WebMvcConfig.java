@@ -52,6 +52,7 @@ public class WebMvcConfig implements WebMvcConfigurer {
                     "/api/practice/scenario/check",
                     "/api/practice/interview/check",
                     "/api/practice/interview/mock",
+                    "/api/practice/sparring/report",
                     "/api/practice/transcribe");
         }
     }

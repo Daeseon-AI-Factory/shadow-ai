@@ -1699,3 +1699,42 @@ BUILD SUCCESSFUL in 36s
 ```
 
 **Commit.** This commit; the immutable hash is recorded by Git history.
+
+---
+
+## 2026-07-13 — F1: mint-only sparring had no server path for an end-of-session report
+
+**Gap (verified).** The F5 commit had no backend route containing `sparring/report`:
+
+```text
+git grep -n 'sparring/report' 4076730 -- backend
+# no matches; exit 1
+```
+
+The realtime bridge sent audio and transcripts between the app and OpenAI, while the backend only
+minted the ephemeral session. It therefore had no learner transcript to summarize after a session.
+
+**Fix.** Added gated, rate-limited `POST /api/practice/sparring/report`, request/response DTOs,
+`CompositionService.sparringReport`, and `SparringReportPrompt`. The client posts learner turns plus
+its own `cardKey`/label targets. The AI sees opaque target IDs; the service requires a complete,
+disjoint used/missed partition and maps IDs back to the original keys. Identical normalized labels
+share one AI classification so separate cards for the same expression cannot be split between used
+and missed. The server does not call `PracticeSrsService` or persist report data.
+
+**Verification.** `cd backend && ./gradlew test --rerun-tasks`:
+
+```text
+BUILD SUCCESSFUL in 3m 27s
+4 actionable tasks: 4 executed
+```
+
+The generated JUnit XML contained no non-zero `failures` or `errors` attribute (`rg` returned no
+matches, exit 1).
+
+**Mobile follow-up (not implemented in this backend commit).** POST a report only after the session
+actually reached `live` and then ended. `connecting` or aborted sessions must send neither a report
+nor grades. For each returned missed target, exclude keys already in the screen's local `hits` set
+(they were already graded `correct:true` live), then call the existing SRS grade endpoint with
+`correct:false`. This avoids promoting and immediately resetting the same card in one session.
+
+**Commit.** This commit; the immutable hash is recorded by Git history.
