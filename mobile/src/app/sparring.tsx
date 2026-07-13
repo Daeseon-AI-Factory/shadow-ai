@@ -17,6 +17,7 @@ import {
   aiCodingKey,
   chunkMatcher,
   localToday,
+  partitionLearning,
   shuffle,
   practiceApi,
   type SrsCard,
@@ -61,9 +62,10 @@ const collocationsPool = (): Candidate[] =>
 const aiCodingPool = (): Candidate[] => AI_CODING.map((p, i) => ({ key: aiCodingKey(i), label: p.en, ko: p.ko }));
 const itPool = (): Candidate[] => IT_TERMS.map((p, i) => ({ key: itTermKey(i), label: p.en, ko: p.ko }));
 
-type TopicKey = 'due' | 'verbs' | 'phrasal' | 'collocations' | 'aicoding' | 'it';
+type TopicKey = 'due' | 'learning' | 'verbs' | 'phrasal' | 'collocations' | 'aicoding' | 'it';
 const TOPICS: { key: TopicKey; pool: () => Candidate[] }[] = [
   { key: 'due', pool: () => [...verbsPool(), ...phrasalPool(), ...collocationsPool()] },
+  { key: 'learning', pool: () => [...verbsPool(), ...phrasalPool(), ...collocationsPool()] },
   { key: 'verbs', pool: verbsPool },
   { key: 'phrasal', pool: phrasalPool },
   { key: 'collocations', pool: collocationsPool },
@@ -93,10 +95,17 @@ export default function SparringScreen() {
   const targets = useMemo(() => {
     if (!srs.data) return [] as (Candidate & { re: RegExp })[];
     const today = localToday();
-    const byKey = new Map((srs.data as SrsCard[]).map((s) => [s.cardKey, s]));
+    const states = srs.data as SrsCard[];
     const due: Candidate[] = [];
     const known: Candidate[] = [];
     const all = poolFor(topic).filter((c) => chunkMatcher(c.label));
+    if (topic === 'learning') {
+      const { learning, fresh } = partitionLearning(all, states, today);
+      return [...learning, ...shuffle(fresh)]
+        .slice(0, TARGET_COUNT)
+        .map((c) => ({ ...c, re: chunkMatcher(c.label)! }));
+    }
+    const byKey = new Map(states.map((s) => [s.cardKey, s]));
     for (const c of all) {
       const st = byKey.get(c.key);
       if (!st) continue;

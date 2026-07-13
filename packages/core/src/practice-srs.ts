@@ -37,6 +37,27 @@ export function partition<T extends Keyed>(all: T[], states: SrsCard[], today: s
   return { due, fresh };
 }
 
+/** Split out low-box cards that are still being learned but are not due yet. Learning cards keep
+ * a deterministic weakest-first order (box, then successful recalls); never-seen cards preserve
+ * deck order so callers can choose whether to shuffle the backfill. */
+export function partitionLearning<T extends Keyed>(all: T[], states: SrsCard[], today: string) {
+  const byKey = new Map(states.map((s) => [s.cardKey, s]));
+  const learning: { item: T; state: SrsCard; order: number }[] = [];
+  const fresh: T[] = [];
+  all.forEach((item, order) => {
+    const state = byKey.get(item.key);
+    if (!state) fresh.push(item);
+    else if (state.box <= 1 && state.dueDate > today) learning.push({ item, state, order });
+  });
+  learning.sort(
+    (a, b) =>
+      a.state.box - b.state.box ||
+      a.state.correctCount - b.state.correctCount ||
+      a.order - b.order,
+  );
+  return { learning: learning.map(({ item }) => item), fresh };
+}
+
 /** The day's session: all due cards (shuffled) + up to NEW_PER_DAY new ones. */
 export function buildSession<T extends Keyed>(all: T[], states: SrsCard[], today: string): T[] {
   const { due, fresh } = partition(all, states, today);
