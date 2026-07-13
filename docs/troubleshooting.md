@@ -1854,3 +1854,4 @@ review는 실패 전후 `1 / 1`, DrillRunner는 `1 / 12`, InterviewDrill은 `1 /
 **Commit.** Track D L6 commit (git history records the immutable hash).
 
 **Pattern.** dark input은 text만이 아니라 surface/border/placeholder/selection을 한 theme source에서 가져와야 한다. 공통 pressed opacity를 기본으로 두고 Android ripple을 추가하면 플랫폼별 피드백을 한 helper 계약으로 유지할 수 있다.
+<!-- skipped: 91f698e docs: visual redesign spec — Sparring as center tab, token reassignment, per-screen + R1-R4 tracks [no-log] -->
