@@ -1310,3 +1310,56 @@ const response = await fetch(buildUrl(path, query), {
 
 **Pattern.** caller 취소와 내부 deadline을 합성할 때는 누가 abort했는지 별도로 기록해야
 사용자 취소를 timeout으로 오분류하지 않는다.
+
+---
+
+## 2026-07-13 — 저장 토큰을 먼저 노출해 만료 세션이 Home을 거치는 부팅 흐름
+
+**Symptom.** 변경 전 root layout은 SecureStore Promise의 성공 경로만 연결하고, 저장 토큰을
+검증하지 않은 채 곧바로 인증 상태로 hydrate했다.
+
+```text
+loadToken().then((token) => hydrate(token));
+```
+
+keychain 읽기가 reject되면 `hydrated`가 계속 false였고, 만료 토큰은 Home의 인증 쿼리들이
+401을 받은 뒤에야 전역 handler가 로그인으로 보냈다.
+
+**Cause (verified).** `git show ae42b74^:mobile/src/app/_layout.tsx`에서 `loadToken()`에
+reject 경로와 사전 `authApi.me()` 검증이 없음을 확인했다. Home에도 쿼리 오류 분기가 없어
+실패 데이터를 빈 계정으로 해석할 수 있었다.
+
+**Fix.** `ae42b74`: Expo SDK 56 splash를 module scope에서 붙잡고, 저장 토큰이 있으면 UI를
+mount하기 전에 L1 timeout이 적용되는 `authApi.me()`로 한 번 검증한다. 성공 응답은 `['me']`
+cache에 seed하고, 401은 live token과 query cache를 먼저 지운 뒤 Login을 초기 route로 연다.
+SecureStore 읽기 실패도 `hydrate(null)`로 끝내 부팅 대기를 해제한다. 중간 세션 401은 동시
+handler를 하나로 합치고 401 재시도를 생략한다. Home의 첫 쿼리들은 한 번 실패하면 명시적
+retry 화면을 보여 빈 상태 CTA로 오인하지 않게 했다.
+
+**Verified.** 실제 root layout을 mock 경계와 함께 import한 임시 Vitest에서 valid token,
+startup 401 + token 삭제 실패, keychain read 실패의 3경로를 실행했다.
+
+```text
+Test Files  1 passed (1)
+Tests  3 passed (3)
+```
+
+TanStack Query 임시 Vitest에서는 401 무재시도·동시 handler 1회·비인증 오류 3회 재시도를
+실행했다.
+
+```text
+Test Files  1 passed (1)
+Tests  2 passed (2)
+```
+
+최신 L2 커밋 직전 `npx tsc --noEmit`은 exit 0, `git diff --cached --check`도 exit 0이었다.
+
+**Unverified.** release build의 실제 iOS/Android 콜드 스타트에서 splash→Login/Home 시각적
+전환은 실행하지 않았다. timeout·offline처럼 검증 결과가 401이 아닌 경우에는 저장 토큰을
+삭제하지 않고 Home의 retry 화면으로 넘기는 fail-open 정책이다.
+
+**Commit.** `ae42b74`
+
+**Pattern.** 저장 credential을 읽었다는 사실과 서버가 그 credential을 인정한다는 사실을
+분리한다. 검증이 끝날 때까지 native splash를 유지하고, 모든 Promise reject 경로가 반드시
+부팅 상태를 종결하도록 만든다.
