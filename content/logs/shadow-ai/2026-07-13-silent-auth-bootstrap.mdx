@@ -1,0 +1,61 @@
+---
+title: "저장 세션을 네이티브 splash 아래에서 조용히 검증"
+date: "2026-07-13"
+project: "shadow-ai"
+kind: "troubleshoot"
+visibility: "public"
+language: "ko"
+summary: "SecureStore 실패와 만료 토큰이 부팅을 멈추거나 Home을 잠깐 노출하지 않도록, 저장 토큰을 bounded me 요청으로 먼저 확인하고 401 fallback을 합쳤다."
+tags: ["auth", "reliability", "expo"]
+---
+
+## 문제
+
+기존 부팅 코드는 다음 한 줄이었다.
+
+```text
+loadToken().then((token) => hydrate(token));
+```
+
+SecureStore가 reject되면 완료 상태로 갈 경로가 없었다. 저장된 JWT가 만료됐을 때는 일단
+Home을 mount한 뒤 여러 인증 쿼리가 401을 받고 나서 Login으로 이동했다.
+
+## 변경
+
+구현 커밋 `ae42b74`에서 Expo SDK 56의 native splash를 module scope에서 붙잡고 다음 순서로
+부팅 상태를 정리했다.
+
+1. SecureStore 읽기 실패 또는 토큰 없음 → unauthenticated hydrate
+2. 저장 토큰 있음 → UI를 열기 전에 `authApi.me()` 실행
+3. 성공 → profile cache seed 후 Home
+4. 401 → live token/query cache 제거 후 Login
+5. timeout/offline → 토큰을 파괴하지 않고 Home의 명시적 retry 화면으로 이동
+
+중간 세션에서 여러 쿼리가 동시에 401을 내도 sign-out handler는 한 번만 실행한다. 401은
+재시도하지 않으며, Home의 최초 요청도 L1 deadline 한 번 뒤 사용자 retry를 표시한다.
+
+## 검증
+
+실제 root layout을 import한 임시 Vitest로 valid token, 401과 SecureStore 삭제 실패의 조합,
+SecureStore 읽기 실패를 실행했다.
+
+```text
+Test Files  1 passed (1)
+Tests  3 passed (3)
+```
+
+QueryClient 경계 테스트는 401 무재시도, 동시 handler coalescing, 비인증 오류의 기존 3회
+retry를 확인했다.
+
+```text
+Test Files  1 passed (1)
+Tests  2 passed (2)
+```
+
+mobile `npx tsc --noEmit`과 staged diff check는 exit 0이었다.
+
+## 아직 확인하지 않은 것
+
+실제 release 앱의 iOS/Android 콜드 스타트를 녹화해 splash와 Login/Home 사이의 한 프레임
+전환까지 확인하지는 않았다. Expo 문서도 splash의 실물 동작은 release build에서 확인하라고
+안내하므로, 이 항목은 제품 수준 검증으로 남는다.
