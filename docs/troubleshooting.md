@@ -1911,3 +1911,81 @@ rawHexMatches=0
 **Commit.** `117b97c94d616d70b5a4e33df26f64c23d3c67cd`
 
 <!-- override-trigger: e8fed45 Merge remote-tracking branch 'origin/codex/redesign-r1' into integration/tracks — 통합(머지) 커밋이며 852 LOC는 R1 브랜치 자체 커밋들이 이미 로깅한 디자인 토큰·공용 컴포넌트 변경분이다. R1의 troubleshooting/mdx 로그가 이 머지로 함께 들어옴(중복 로깅 불필요). -->
+
+---
+
+## 2026-07-13 — Home 상단 우선순위와 Practice 팩 메타가 redesign 구조와 달랐음
+
+**Symptom.** R3 기준 브랜치의 Home은 동적으로 고른 한 CTA와 두 개의 작은 카드가 중심이었고,
+Practice에는 Sparring이 일반 카드로 남아 있었다. 기준 파일을 읽은 실제 출력은 다음과 같았다.
+
+```text
+23: * knows what to tap in a second. Everything else is one tap behind the two slim cards below.
+173:          {/* The single primary action. */}
+205:          {/* Everything else is one tap behind these two. */}
+226:function MiniCard({ icon, title, onPress }: { icon: SymbolName; title: string; onPress: () => void }) {
+31:      href: '/sparring',
+255:function ToolCard({ tool }: { tool: Tool }) {
+```
+
+**Cause (verified).** 기존 `index.tsx`는 due/recent/latest video 결과로 primary CTA를 바꾸고
+streak를 보조 문구로만 표시했다. 기존 `practice.tsx`는 정적 세로 목록이며 SRS 상태를 읽지 않아
+팩별 due를 계산할 수 없었다. Home streak의 `reviewApi.streak().dueToday`는 clip review 수이고,
+Practice의 `practiceApi.srsStates().dueDate`는 drill-card 수라서 같은 값으로 재사용할 수도 없었다.
+
+**Fix.** `mobile/src/app/(tabs)/index.tsx`는 `me`/`streak`/`recent`와 hydration/error/refetch
+흐름을 유지하면서 ink gradient streak, live Sparring hero, Today's 30/My clips/Weak spots 타일 순서로
+바꿨다. clip count 실패는 타일에 `—`로만 표시해 보조 쿼리가 전체 Home을 가리지 않는다.
+`mobile/src/app/(tabs)/practice.tsx`는 R1 Card/Chip을 쓰는 2열 그리드로 바꾸고 Sparring 카드를
+제거했다. 정적 팩 8개는 실제 카드 count와 `cardIndex()`에 존재하면서 오늘까지 due인 SRS key만
+prefix별로 세며, 탭 focus 때 재조회한다. 기존 top-level route 비교에서 제거된 것은 다음 하나였다.
+
+```text
+href: '/sparring'
+```
+
+다크 appearance 첫 캡처에서는 gradient 위 `Day streak`와 큰 숫자만 보이지 않고 native symbol과
+배경이 있는 due pill은 남았다. **Hypothesis:** RN의 experimental gradient 합성 순서가 plain Text를
+덮었다. **Verified by:** streak content row를 foreground `zIndex: 1`로 올린 뒤 격리된 동일
+시뮬레이터의 다크 재캡처에서 label과 숫자가 다시 표시됐다. RN 내부 원인은 [unverified]다.
+
+**Verification.** 실제 R1 커밋 위 R3 브랜치에서 다음 결과를 얻었다.
+
+```text
+$ npx tsc --noEmit
+[exit 0; stdout empty]
+
+$ raw color scan
+raw_color_hits=0
+
+$ npx expo export --platform ios --output-dir /private/tmp/shadow-r3-ios-export
+iOS Bundled 164338ms node_modules/expo-router/entry.js (1296 modules)
+Exported: /private/tmp/shadow-r3-ios-export
+
+$ npx expo export --platform android --output-dir /private/tmp/shadow-r3-android-export
+Android Bundled 167253ms node_modules/expo-router/entry.js (1733 modules)
+Exported: /private/tmp/shadow-r3-android-export
+```
+
+전용 iPhone 17 Pro Max iOS 26.5 Simulator에서 Home과 Practice를 light/dark 각각 캡처해 streak,
+Sparring hero, 세 타일, 2열 팩 카드와 `count · N due` 가독성을 확인했다. 로컬 계정 Maestro
+검증은 다음처럼 끝났다.
+
+```text
+Tap on "Start talking"... COMPLETED
+Assert that "Topic" is visible... COMPLETED
+Tap on point (50%,65%)... COMPLETED
+Assert that "Library" is visible... COMPLETED
+```
+
+**Known gap.** My clips는 명세대로 기존 `/videos` 화면을 열지만 그 화면의 초기 section은
+`videos`라 Clips pane까지 한 번 더 눌러야 한다. 직접 Clips 진입은 R3 금지 파일인 `videos.tsx`
+route-param 지원이 필요하다. `experimental_backgroundImage`는 RN 0.85 문서가 production 사용을
+경고하는 API지만, 허용 파일과 기존 의존성 안에서 gradient 요구를 충족하기 위해 ink fallback과
+foreground layer를 함께 썼다. Android 실기기 렌더, Dynamic Type, screen reader, R2 center-tab과의
+최종 병합 화면은 [unverified]다.
+
+**Commit.** `20be4750db9c66d928c1950be578e5c6cda1d67d`
+
+**Pattern.** 같은 화면의 “due”라도 review queue와 drill-card SRS는 도메인이 다르다. 시각 메타를
+추가할 때 화면마다 실제 API shape와 key namespace를 먼저 확인해야 한다.
