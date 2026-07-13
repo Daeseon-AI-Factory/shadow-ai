@@ -1401,3 +1401,29 @@ api.jjan / beside 도 동일하게 HTTP 000. docvault(303)·faangforge(200)만 �
 **Pattern.** 콘텐츠에 이미 사람이 만든 분류(팩)가 있으면, 그게 곧 "주제 축"이다 — 임베딩 군집 같은 무거운 것 전에 기존 분류로 스코프하면 응집의 8할을 공짜로 얻는다.
 
 <!-- skipped: 3d055e3 docs(log): 스파링 주제 스코프 세션 [no-log] -->
+
+---
+
+## 2026-07-13 — 스파링 연결이 끝나지 않고 서버 원문 오류가 노출됨
+
+**Symptom (코드 감사).** 변경 전 `mobile/src/app/sparring.tsx`는 mint/WebView 연결의 종료 시점을 제한하지 않았고, 받은 오류 문자열을 그대로 화면 상태에 넣었다.
+
+```tsx
+setError((e as Error).message);
+setError(msg.message ?? 'unknown');
+```
+
+**Cause (검증됨).** 변경 전 연결 단계에는 `setTimeout`과 Cancel 동작이 없었다. mint가 끝난 뒤 WebView의 `connected` 메시지가 오지 않으면 `phase === 'connecting'`이 계속 유지됐고, 늦게 끝난 mint 요청을 무효화하는 시도 식별자도 없었다.
+
+**Fix.** `mobile/src/app/sparring.tsx`에 12,000ms 연결 상한, 명시적 Cancel, 늦은 mint 응답 무효화, WebView load/bridge 오류 처리, 타이머 cleanup을 추가했다. 원문은 `[sparring]` 경고 로그로 남기고 사용자에게는 `mobile/src/lib/i18n-messages.ts`의 영어/한국어 복구 문구만 표시한다.
+
+**검증 (함수 수준: 정적/타입).** 아래 명령은 둘 다 exit 0이었다. 실제 iOS WebView 강제 종료와 Cancel 탭 흐름은 아직 실행하지 않았다.
+
+```text
+$ cd mobile && npx tsc --noEmit
+(no stdout; exit 0)
+$ git diff --check
+(no stdout; exit 0)
+```
+
+**Commit.** `abfe172`

@@ -1,0 +1,31 @@
+---
+title: "스파링 연결에 끝을 만들다 — 12초 상한, 취소, 복구 문구"
+date: "2026-07-13"
+project: "shadow-ai"
+kind: "ux-retro"
+visibility: "public"
+language: "ko"
+summary: "Realtime mint 또는 WebView 연결이 끝나지 않던 경로에 12초 상한과 Cancel을 추가했다. 내부 오류 원문은 로그에만 남기고 화면은 재시도 가능한 한국어·영어 안내로 통일했다."
+tags: ["sparring", "reliability", "expo", "ux"]
+---
+
+## 문제
+
+스파링은 API가 세션을 mint한 뒤 숨은 WebView가 `connected`를 보내야 시작된다. 변경 전에는
+이 둘을 합친 연결 단계에 상한이 없어서, WebView가 응답하지 않으면 사용자가
+`Connecting…` 화면을 빠져나올 수 없었다. API와 WebView의 오류 문자열도 그대로 노출됐다.
+
+## 변경
+
+- 연결 시작부터 **12초 상한**을 적용하고, 성공·실패·취소 시 타이머를 정리한다.
+- 연결 화면에 **Cancel**을 두고 WebView를 정지한 뒤 idle로 복귀한다.
+- 시도 ID를 증가시켜 취소 뒤 늦게 도착한 mint 응답이 WebView를 다시 띄우지 못하게 한다.
+- mint, WebView load, bridge 오류 원문은 개발 로그에 남기고 화면에는 지역화된 복구 문구만 쓴다.
+
+## 검증 범위
+
+`cd mobile && npx tsc --noEmit`과 `git diff --check`는 exit 0이었다. 이는 타입과 diff 형식만
+확인한다. 실제 iOS에서 WebView를 강제 종료해 12초 내 복귀하는지와 Cancel 탭 동작은 아직
+검증하지 않았으며, 전체 트랙 개발 빌드에서 확인할 예정이다.
+
+구현 커밋: `abfe172`.
