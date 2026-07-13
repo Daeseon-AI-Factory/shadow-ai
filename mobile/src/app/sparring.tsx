@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Redirect } from 'expo-router';
+import { Redirect, router } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import {
   VERB_PACK,
   verbKey,
-  PARTICLE_FAMILIES,
+  PARTICLE_INFO,
   PHRASAL_500,
   phrasal500Key,
   COLLOCATIONS,
@@ -21,6 +21,7 @@ import {
   partitionLearning,
   shuffle,
   practiceApi,
+  ApiError,
   type SrsCard,
 } from '@shadow-ai/core';
 
@@ -43,15 +44,20 @@ const CONNECT_TIMEOUT_MS = 12_000;
 type Mode = 'chat' | 'interview';
 type Phase = 'idle' | 'connecting' | 'live' | 'done';
 type Candidate = { key: string; label: string; ko: string };
-type VerbCandidate = Candidate & { verbId: string };
+type VerbCandidate = Candidate & { verbId: string; particle: string | null };
 type Line = { who: 'me' | 'ai'; text: string };
 type ScopeAxis = 'verb' | 'particle';
 
 const ALL_SCOPE = '__all__';
+const INVITE_ONLY_CODES = new Set(['AI_NOT_ALLOWED', 'SPARRING_NOT_ALLOWED']);
 
 function logSparringError(context: string, error: unknown) {
   const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
   console.warn(`[sparring] ${context}: ${detail}`);
+}
+
+function isInviteOnlyError(error: unknown): error is ApiError {
+  return error instanceof ApiError && error.status === 403 && INVITE_ONLY_CODES.has(error.code);
 }
 
 // Candidate pools per TOPIC. Scoping a session to one topic keeps the 6 targets in one domain,
@@ -59,15 +65,21 @@ function logSparringError(context: string, error: unknown) {
 // + collocations in one chat feels forced). Long entries are dropped later by chunkMatcher, so a
 // topic auto-keeps only its sayable expressions.
 const VERB_CANDIDATES: VerbCandidate[] = VERB_PACK.flatMap((g) =>
-  g.items.map((it, i) => ({ key: verbKey(g.id, i), label: it.model, ko: it.cue, verbId: g.id })),
+  g.items.map((it, i) => {
+    const key = verbKey(g.id, i);
+    return {
+      key,
+      label: it.model,
+      ko: it.cue,
+      verbId: g.id,
+      particle: PARTICLE_INFO[key]?.particle || null,
+    };
+  }),
 );
-const VERB_CANDIDATE_BY_KEY = new Map(VERB_CANDIDATES.map((candidate) => [candidate.key, candidate]));
 const verbsPool = (verbId?: string): Candidate[] =>
   verbId ? VERB_CANDIDATES.filter((candidate) => candidate.verbId === verbId) : VERB_CANDIDATES;
 const particlePool = (particle: string): Candidate[] =>
-  (PARTICLE_FAMILIES[particle] ?? [])
-    .map((key) => VERB_CANDIDATE_BY_KEY.get(key))
-    .filter((candidate): candidate is VerbCandidate => Boolean(candidate));
+  VERB_CANDIDATES.filter((candidate) => candidate.particle === particle);
 const phrasalPool = (): Candidate[] =>
   PHRASAL_500.map((p, i) => ({ key: phrasal500Key(i), label: p.phrasal, ko: p.ko }));
 const collocationsPool = (): Candidate[] =>
@@ -80,13 +92,16 @@ const VERB_SCOPE_GROUPS = VERB_PACK.map((group) => ({
   label: group.verb === 'APPENDIX' ? 'PHRASE' : group.verb,
   n: group.items.filter((item) => chunkMatcher(item.model)).length,
 })).filter((group) => group.n > 0);
-const PARTICLE_SCOPE_GROUPS = Object.keys(PARTICLE_FAMILIES)
-  .map((particle) => ({
-    id: particle,
-    label: particle,
-    n: particlePool(particle).filter((candidate) => chunkMatcher(candidate.label)).length,
-  }))
-  .filter((group) => group.n > 0);
+const PARTICLE_SCOPE_GROUPS = (() => {
+  const counts = new Map<string, number>();
+  for (const candidate of VERB_CANDIDATES) {
+    if (!candidate.particle || !chunkMatcher(candidate.label)) continue;
+    counts.set(candidate.particle, (counts.get(candidate.particle) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([id, n]) => ({ id, label: id, n }))
+    .sort((a, b) => b.n - a.n);
+})();
 
 type TopicKey = 'due' | 'learning' | 'verbs' | 'phrasal' | 'collocations' | 'aicoding' | 'it';
 const TOPICS: { key: TopicKey; pool: () => Candidate[] }[] = [
@@ -108,7 +123,9 @@ export default function SparringScreen() {
   const token = useAuthStore((s) => s.token);
   const [phase, setPhase] = useState<Phase>('idle');
   const [error, setError] = useState<string | null>(null);
+  const [inviteOnly, setInviteOnly] = useState(false);
   const [session, setSession] = useState<{ clientSecret: string; model: string } | null>(null);
+  const [sessionAttempt, setSessionAttempt] = useState<number | null>(null);
   const [hits, setHits] = useState<Set<string>>(new Set());
   const [lines, setLines] = useState<Line[]>([]);
   const [elapsed, setElapsed] = useState(0);
@@ -118,6 +135,12 @@ export default function SparringScreen() {
   const webRef = useRef<WebView>(null);
   const scrollRef = useRef<ScrollView>(null);
   const connectAttemptRef = useRef(0);
+  const connectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearConnectTimer = () => {
+    if (connectTimerRef.current !== null) clearTimeout(connectTimerRef.current);
+    connectTimerRef.current = null;
+  };
 
   const srs = useQuery({ queryKey: ['srs'], queryFn: () => practiceApi.srsStates(), enabled: !!token });
 
@@ -160,15 +183,23 @@ export default function SparringScreen() {
 
   useEffect(() => {
     if (phase !== 'connecting') return;
+    const attempt = connectAttemptRef.current;
     const id = setTimeout(() => {
+      if (connectAttemptRef.current !== attempt) return;
+      connectTimerRef.current = null;
       logSparringError('connection timed out', `${CONNECT_TIMEOUT_MS}ms`);
       connectAttemptRef.current += 1;
       webRef.current?.injectJavaScript('window.stopSparring && window.stopSparring(); true;');
       setSession(null);
+      setSessionAttempt(null);
       setError(t('sparring.errorTimeout'));
       setPhase('idle');
     }, CONNECT_TIMEOUT_MS);
-    return () => clearTimeout(id);
+    connectTimerRef.current = id;
+    return () => {
+      clearTimeout(id);
+      if (connectTimerRef.current === id) connectTimerRef.current = null;
+    };
   }, [phase]);
 
   useEffect(() => {
@@ -177,7 +208,11 @@ export default function SparringScreen() {
 
   const start = async (mode: Mode) => {
     const attempt = ++connectAttemptRef.current;
+    clearConnectTimer();
     setError(null);
+    setInviteOnly(false);
+    setSession(null);
+    setSessionAttempt(null);
     setPhase('connecting');
     try {
       const minted = await practiceApi.sparringSession(
@@ -186,29 +221,41 @@ export default function SparringScreen() {
       );
       if (connectAttemptRef.current !== attempt) return;
       setSession(minted); // mounts the hidden WebView; onLoadEnd injects the secret
+      setSessionAttempt(attempt);
     } catch (e) {
       if (connectAttemptRef.current !== attempt) return;
+      clearConnectTimer();
       logSparringError('failed to mint session', e);
-      setError(t('sparring.errorStart'));
+      if (isInviteOnlyError(e)) setInviteOnly(true);
+      else setError(t('sparring.errorStart'));
+      setSession(null);
+      setSessionAttempt(null);
       setPhase('idle');
     }
   };
 
   const cancelConnecting = () => {
     connectAttemptRef.current += 1;
+    clearConnectTimer();
     webRef.current?.injectJavaScript('window.stopSparring && window.stopSparring(); true;');
     setSession(null);
+    setSessionAttempt(null);
     setError(null);
     setPhase('idle');
   };
 
   const stop = () => {
+    connectAttemptRef.current += 1;
+    clearConnectTimer();
     webRef.current?.injectJavaScript('window.stopSparring && window.stopSparring(); true;');
     setSession(null);
+    setSessionAttempt(null);
     setPhase('done');
   };
 
   const reset = () => {
+    connectAttemptRef.current += 1;
+    clearConnectTimer();
     setHits(new Set());
     setLines([]);
     setElapsed(0);
@@ -226,14 +273,18 @@ export default function SparringScreen() {
     setScopePick(ALL_SCOPE);
   };
 
-  const onMessage = (e: WebViewMessageEvent) => {
+  const onMessage = (e: WebViewMessageEvent, sourceAttempt: number) => {
     let msg: { type: string; text?: string; value?: string; message?: string };
     try {
       msg = JSON.parse(e.nativeEvent.data);
     } catch {
       return;
     }
-    if (msg.type === 'connected') setPhase('live');
+    if (sourceAttempt !== connectAttemptRef.current) return;
+    if (msg.type === 'connected' && phase === 'connecting') {
+      clearConnectTimer();
+      setPhase('live');
+    }
     if (msg.type === 'ai' && msg.text) setLines((ls) => [...ls, { who: 'ai', text: msg.text! }]);
     if (msg.type === 'user' && msg.text) {
       const text = msg.text;
@@ -255,7 +306,9 @@ export default function SparringScreen() {
       setError(t('sparring.errorConnection'));
       if (phase === 'connecting') {
         connectAttemptRef.current += 1;
+        clearConnectTimer();
         setSession(null);
+        setSessionAttempt(null);
         setPhase('idle');
       }
     }
@@ -297,26 +350,31 @@ export default function SparringScreen() {
   return (
     <ThemedView style={styles.flex}>
       <SafeAreaView style={styles.flex} edges={['bottom']}>
-        {session && (
+        {session && sessionAttempt !== null && (
           <WebView
+            key={sessionAttempt}
             ref={webRef}
             source={{ uri: `${getApiBaseUrl()}/sparring.html` }}
             style={styles.hiddenWeb}
-            onMessage={onMessage}
+            onMessage={(event) => onMessage(event, sessionAttempt)}
             onError={(event) => {
+              if (sessionAttempt !== connectAttemptRef.current) return;
               logSparringError('WebView load error', event.nativeEvent.description);
               setError(t('sparring.errorConnection'));
               if (phase === 'connecting') {
                 connectAttemptRef.current += 1;
+                clearConnectTimer();
                 setSession(null);
+                setSessionAttempt(null);
                 setPhase('idle');
               }
             }}
-            onLoadEnd={() =>
+            onLoadEnd={() => {
+              if (sessionAttempt !== connectAttemptRef.current) return;
               webRef.current?.injectJavaScript(
                 `window.startSparring(${JSON.stringify(session)}); true;`,
-              )
-            }
+              );
+            }}
             javaScriptEnabled
             allowsInlineMediaPlayback
             mediaPlaybackRequiresUserAction={false}
@@ -325,7 +383,28 @@ export default function SparringScreen() {
           />
         )}
 
-        {phase === 'idle' && (
+        {phase === 'idle' && inviteOnly && (
+          <View style={styles.inviteScreen}>
+            <View style={styles.inviteCard}>
+              <ThemedText style={styles.inviteIcon}>🔒</ThemedText>
+              <ThemedText type="title" style={styles.inviteTitle}>
+                {t('aiInvite.title')}
+              </ThemedText>
+              <ThemedText type="small" style={styles.inviteBody}>
+                {t('aiInvite.body')}
+              </ThemedText>
+              <Pressable
+                style={styles.inviteButton}
+                onPress={() => router.replace('/practice')}
+                accessibilityRole="button"
+              >
+                <ThemedText style={styles.inviteButtonText}>{t('aiInvite.freePractice')}</ThemedText>
+              </Pressable>
+            </View>
+          </View>
+        )}
+
+        {phase === 'idle' && !inviteOnly && (
           <ScrollView contentContainerStyle={styles.container}>
             <ThemedText type="title">{t('sparring.title')}</ThemedText>
             <ThemedText type="small">{t('sparring.subtitle')}</ThemedText>
@@ -499,6 +578,30 @@ const styles = StyleSheet.create({
   },
   topicChipOn: { backgroundColor: '#208AEF', borderColor: '#208AEF' },
   topicChipOnText: { color: '#fff' },
+  inviteScreen: { flex: 1, justifyContent: 'center', padding: 24 },
+  inviteCard: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#f59e0b88',
+    backgroundColor: '#f59e0b12',
+    borderRadius: 18,
+    padding: 24,
+    alignItems: 'center',
+    gap: 12,
+  },
+  inviteIcon: { fontSize: 34 },
+  inviteTitle: { textAlign: 'center' },
+  inviteBody: { textAlign: 'center', lineHeight: 20 },
+  inviteButton: {
+    alignSelf: 'stretch',
+    minHeight: 48,
+    borderRadius: 12,
+    backgroundColor: '#208AEF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    marginTop: 4,
+  },
+  inviteButtonText: { color: '#fff', fontWeight: '700' },
   scopeWrap: { gap: 8 },
   scopeAxisRow: { flexDirection: 'row', gap: 8 },
   scopeAxisBtn: {
