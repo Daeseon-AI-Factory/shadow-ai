@@ -1,0 +1,70 @@
+---
+title: "R1 의미 토큰과 공용 Pressable 기반"
+date: "2026-07-13"
+project: "shadow-ai"
+kind: "tech-retro"
+visibility: "public"
+language: "ko"
+summary: "기존 색 값을 primary/live/mint 의미로 고정하고, light/dark 공용 Card·Chip·PrimaryButton·TalkButton과 press/focus helper를 추가했다."
+tags: ["expo", "react-native", "design-system", "accessibility"]
+---
+
+## 경계
+
+이번 R1은 화면을 다시 그리지 않고 R2–R4가 소비할 디자인 시스템 기반만 만든다. 변경 대상은
+theme, useTheme, ThemedText와 신규 Card, Chip, PrimaryButton/TalkButton, press/focus helper다.
+index, practice, sparring, review, settings, tab layout은 건드리지 않았다.
+
+## 토큰 결정
+
+`docs/REDESIGN.md`의 primary/live/mint 표 값은 실제 `theme.ts`와 달랐다. 사용자 지시의
+“기존 값 유지”를 적용해 실제 primary를 그대로 두고 coral을 live, accent를 mint 의미로
+재노출했다. 아직 onboarding이 이전 이름을 쓰므로 accent, accentSoft, coral은 deprecated
+호환 alias로 남겼다. 신규 light/dark 토큰은 liveSoft, mintSoft, amber, ink, pressed와
+강조 surface 위 글자색인 onPrimary/onLive/onMint/onAmber다.
+
+React Native 0.85의 fontWeight 타입과 native 변환기는 100 단위만 받는다. 명세의 section 750을
+그대로 전달하면 regular로 처리되므로, display 800보다 한 단계 가벼운 지원값 700으로 매핑했다.
+기존 title/subtitle/default/code의 치수는 R2–R4 소유 화면을 간접 변경하지 않도록 유지했다.
+
+## 상호작용 기반
+
+공용 helper는 `Pressable`의 `{ pressed }`를 사용해 opacity 0.82와 scale 0.98을 적용한다.
+소비자가 이미 transform을 쓰면 배열과 CSS 문자열 모두 뒤에 scale을 합성한다. focus callback은
+별도 상태로 관리하고, 밝은 surface와 강제 dark studio ground 양쪽에서 대비가 남는 primary
+outline을 쓴다. Android ripple 색은 현재 scheme의 pressed token에서 온다.
+
+Card는 정적 surface와 press/hover/focus callback 기반 interactive surface를 함께 지원한다.
+Chip은 neutral/primary/live/mint/amber tone과 selected/disabled state를 제공한다.
+PrimaryButton과 TalkButton은 같은 구현을 공유하되 각각 primary와 live 배경을 쓴다. 네 공용
+surface 모두 native View ref를 전달한다.
+
+## 검증
+
+첫 구현은 nullable `disabled`, Pressable render-function children, 잘못된 ReactNode import 때문에
+TypeScript 오류가 났고 이를 실제 RN 타입에 맞춰 수정했다. 최종 출력은 다음과 같다.
+
+```text
+$ npx tsc --noEmit --pretty false
+[exit 0; stdout empty]
+
+$ theme parity and text contrast
+light keys=24 minTextContrast=4.69
+dark keys=24 minTextContrast=7.06
+
+$ focus contrast
+light minFocusContrast=3.74
+dark minFocusContrast=4.63
+
+$ pressed transform composition
+array opacity=0.82 transform=[{"translateX":12},{"rotate":"5deg"},{"scale":0.98}]
+string opacity=0.82 transform=translateX(12px) rotate(5deg) scale(0.98)
+
+$ raw component colors
+rawHexMatches=0
+```
+
+`git diff --check`도 stdout 없이 exit 0이었다. 실제 iOS/Android light/dark 렌더, 실제 터치 체감,
+키보드 focus ring, R2–R4 화면 통합은 [unverified]다.
+
+Commit: `117b97c94d616d70b5a4e33df26f64c23d3c67cd`

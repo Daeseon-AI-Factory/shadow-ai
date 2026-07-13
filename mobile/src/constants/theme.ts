@@ -1,46 +1,104 @@
 /**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
+ * Semantic colors shared by every MiMi surface.
+ *
+ * Brand colors have one job each: primary is study, live is speaking/recording,
+ * mint is a learner-produced target, amber is streak progress, and ink is the
+ * studio ground. Components should consume these names instead of raw colors.
  */
 
 import '@/global.css';
 
 import { Platform } from 'react-native';
 
-export const Colors = {
-  light: {
-    text: '#102033',
-    background: '#F6FAFF',
-    backgroundElement: '#FFFFFF',
-    backgroundSelected: '#E5F0FF',
-    textSecondary: '#66758A',
-    border: '#D7E4F2',
-    primary: '#096AE8',
-    primaryStrong: '#034EBC',
-    primarySoft: '#E1EFFF',
-    accent: '#12BFB9',
-    accentSoft: '#DDF8F6',
-    coral: '#FF744D',
-    surfaceRaised: '#FFFFFF',
-  },
-  dark: {
-    text: '#F8FBFF',
-    background: '#07111F',
-    backgroundElement: '#111D2D',
-    backgroundSelected: '#183455',
-    textSecondary: '#AAB8C9',
-    border: '#26394F',
-    primary: '#52A0FF',
-    primaryStrong: '#7EBDFF',
-    primarySoft: '#102C4F',
-    accent: '#25D3CD',
-    accentSoft: '#0F3A3C',
-    coral: '#FF8A64',
-    surfaceRaised: '#101A28',
-  },
-} as const;
+export type ThemeTokens = {
+  text: string;
+  background: string;
+  backgroundElement: string;
+  backgroundSelected: string;
+  textSecondary: string;
+  border: string;
+  surfaceRaised: string;
+  primary: string;
+  primaryStrong: string;
+  primarySoft: string;
+  onPrimary: string;
+  live: string;
+  liveSoft: string;
+  onLive: string;
+  mint: string;
+  mintSoft: string;
+  onMint: string;
+  amber: string;
+  onAmber: string;
+  ink: string;
+  pressed: string;
+  /** @deprecated Use `mint`. Kept until the redesign tracks migrate every consumer. */
+  accent: string;
+  /** @deprecated Use `mintSoft`. */
+  accentSoft: string;
+  /** @deprecated Use `live`. */
+  coral: string;
+};
 
-export type ThemeColor = keyof typeof Colors.light & keyof typeof Colors.dark;
+const light = {
+  text: '#102033',
+  background: '#F6FAFF',
+  backgroundElement: '#FFFFFF',
+  backgroundSelected: '#E5F0FF',
+  textSecondary: '#66758A',
+  border: '#D7E4F2',
+  surfaceRaised: '#FFFFFF',
+  primary: '#096AE8',
+  primaryStrong: '#034EBC',
+  primarySoft: '#E1EFFF',
+  onPrimary: '#FFFFFF',
+  live: '#FF744D',
+  liveSoft: '#FFE6DF',
+  onLive: '#0A1420',
+  mint: '#12BFB9',
+  mintSoft: '#DDF8F6',
+  onMint: '#0A1420',
+  amber: '#F5A623',
+  onAmber: '#0A1420',
+  ink: '#0A1420',
+  pressed: 'rgba(10, 20, 32, 0.08)',
+  accent: '#12BFB9',
+  accentSoft: '#DDF8F6',
+  coral: '#FF744D',
+} as const satisfies ThemeTokens;
+
+const dark = {
+  text: '#F8FBFF',
+  background: '#07111F',
+  backgroundElement: '#111D2D',
+  backgroundSelected: '#183455',
+  textSecondary: '#AAB8C9',
+  border: '#26394F',
+  surfaceRaised: '#101A28',
+  primary: '#52A0FF',
+  primaryStrong: '#7EBDFF',
+  primarySoft: '#102C4F',
+  onPrimary: '#07111F',
+  live: '#FF8A64',
+  liveSoft: '#2A1712',
+  onLive: '#07111F',
+  mint: '#25D3CD',
+  mintSoft: '#0F3A3C',
+  onMint: '#07111F',
+  amber: '#F2B23C',
+  onAmber: '#07111F',
+  ink: '#0A1420',
+  pressed: 'rgba(248, 251, 255, 0.12)',
+  accent: '#25D3CD',
+  accentSoft: '#0F3A3C',
+  coral: '#FF8A64',
+} as const satisfies ThemeTokens;
+
+export const Colors = { light, dark } as const;
+
+export type ThemeName = keyof typeof Colors;
+export type Theme = (typeof Colors)[ThemeName];
+export type ThemeColor = keyof Theme;
 
 export const Fonts = Platform.select({
   ios: {
