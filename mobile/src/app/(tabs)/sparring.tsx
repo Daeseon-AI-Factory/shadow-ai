@@ -28,6 +28,7 @@ import {
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { ErrorState } from '@/components/error-state';
+import { SparringSessionSummary } from '@/components/session-summary';
 import { useAuthStore } from '@/lib/auth-store';
 import { getApiBaseUrl } from '@/lib/api';
 import { t } from '@/lib/i18n';
@@ -530,15 +531,13 @@ export default function SparringScreen() {
         )}
 
         {phase === 'done' && (
-          <ScrollView contentContainerStyle={styles.container}>
-            <ThemedText type="title">{t('sparring.reportTitle')}</ThemedText>
-            <ThemedText type="subtitle">
-              {t('sparring.usedCount', { used: hits.size, total: targets.length })}
-            </ThemedText>
-            {chips}
-            <Pressable style={styles.primaryBtn} onPress={reset} accessibilityRole="button">
-              <ThemedText style={styles.primaryText}>{t('sparring.again')}</ThemedText>
-            </Pressable>
+          <SparringSessionSummary
+            userTurns={lines.filter((line) => line.who === 'me').map((line) => line.text)}
+            targets={targets.map(({ key, label, ko }) => ({ cardKey: key, label, ko }))}
+            detectedUsed={hits.size}
+            confirmLabel={t('sparring.again')}
+            onConfirm={reset}
+          >
             <ThemedText type="subtitle">{t('sparring.transcriptTitle')}</ThemedText>
             {lines.map((l, i) => (
               <ThemedText key={i} type="small" style={l.who === 'me' ? styles.meLine : undefined}>
@@ -546,7 +545,7 @@ export default function SparringScreen() {
                 {l.text}
               </ThemedText>
             ))}
-          </ScrollView>
+          </SparringSessionSummary>
         )}
       </SafeAreaView>
     </ThemedView>
