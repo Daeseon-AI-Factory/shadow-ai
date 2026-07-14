@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { patternKey, collocationKey, cardIndex } from "@/lib/practice-cards";
 import { PATTERNS } from "@/lib/patterns";
 import { COLLOCATIONS } from "@/lib/collocations";
+import { PRACTICE_PACK_SIZES } from "@shadow-ai/core";
 
 describe("card keys", () => {
   it("formats pattern and collocation keys", () => {
@@ -28,10 +29,8 @@ describe("cardIndex", () => {
     expect(info!.title).toBe(c.anchor);
   });
 
-  it("indexes every item across both decks", () => {
-    const expected =
-      PATTERNS.reduce((s, p) => s + p.items.length, 0) +
-      COLLOCATIONS.reduce((s, c) => s + c.items.length, 0);
+  it("indexes every item across all static SRS packs", () => {
+    const expected = Object.values(PRACTICE_PACK_SIZES).reduce((total, size) => total + size, 0);
     expect(cardIndex().size).toBe(expected);
   });
 });
