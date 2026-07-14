@@ -2032,3 +2032,7 @@ iOS Simulator 캡처에서 Me의 상·하단을 light와 dark로 확인했다. �
 pressed frame, 카드 flip 중간 frame, Android ripple, VoiceOver/TalkBack은 확인하지 않았다.
 
 **Commit.** `6083d3252c9fb7f1b66b291d1046ae4546da080f`.
+
+## 2026-07-14 — 스파링 독립 중앙 탭 승격 (R2, 직접구현)
+
+Codex R2 미산출(커밋 0)이라 직접: `sparring.tsx` → `(tabs)/sparring.tsx`, 커스텀 `tabBarButton`으로 중앙 부양 `live` 코랄 마이크, videos `href:null`, 루트 라우트 제거, safe-area top. `@react-navigation/bottom-tabs` 타입 미존재라 로컬 `TabBarButtonProps`(onPress `(...args:any[])`)로 우회. tsc exit 0.

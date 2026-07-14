@@ -1,0 +1,28 @@
+---
+title: "AI 스파링을 앱의 중심으로 — 독립 중앙 탭 승격 (R2)"
+date: "2026-07-14"
+project: "shadow-ai"
+kind: "update"
+visibility: "public"
+language: "ko"
+summary: "묻혀있던 스파링을 최상위 중앙 탭으로 올렸다. 'live' 코랄색의 부양 마이크 버튼 — 나머지 파란 앱과 다른 색·다른 자리로, 제품의 해자(말하기)가 가장 눈에 띄는 픽셀을 갖게 했다. Codex R2 트랙이 미산출이라 직접 구현."
+tags: ["redesign", "ia", "sparring"]
+---
+
+## 무엇
+스파링(`sparring.tsx`)을 `(tabs)/sparring.tsx`로 옮겨 진짜 최상위 탭으로. 탭바는
+Today · Practice · **[Sparring]** · Review · Me. 스파링만 커스텀 `tabBarButton`으로
+중앙에 부양시키고 `live` 코랄 마이크 아이콘 — 파란 앱과 다른 색이라 "다른 종류의 장소"로 읽힌다.
+Library(videos)는 탭바에서 내리고(`href:null`) 홈의 "My clips"로 접근. 루트 스파링 라우트 제거,
+화면 상단 safe-area 추가(네이티브 헤더 없앰).
+
+## 왜 직접
+Codex R2(cinder-hawk)가 브랜치 커밋 0으로 미산출. 스파링 탭 승격이 사용자 최우선이라 직접 구현.
+
+## 검증
+`npx tsc --noEmit` exit 0. `@react-navigation/bottom-tabs` 타입이 직접 dep이 아니라
+tabBarButton props는 로컬 최소 타입으로 처리.
+
+## 남은 것
+스파링 화면 자체의 "스튜디오 룸" 비주얼(다크 그라운드·큰 마이크·발광)은 후속 폴리시.
+이번 커밋은 IA 승격(독립 중앙 탭)까지.
