@@ -1,4 +1,4 @@
-import { StyleSheet, View, type ColorValue } from 'react-native';
+import { Pressable, StyleSheet, Text, View, type ColorValue } from 'react-native';
 import { Tabs } from 'expo-router';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 
@@ -6,17 +6,58 @@ import { useTheme } from '@/hooks/use-theme';
 import { t } from '@/lib/i18n';
 
 type SymbolName = SymbolViewProps['name'];
-
-const tabIcon =
-  (name: SymbolName) =>
-  ({ focused, color }: { focused: boolean; color: ColorValue }) => (
-    <View style={[styles.iconShell, focused && styles.iconShellActive]}>
-      <SymbolView name={name} size={20} weight={focused ? 'bold' : 'regular'} tintColor={color} />
-    </View>
-  );
+// Minimal shape of the props expo-router hands a custom tabBarButton (avoids depending on
+// @react-navigation/bottom-tabs types, which aren't a direct dependency here).
+type TabBarButtonProps = {
+  onPress?: (...args: any[]) => void;
+  accessibilityState?: { selected?: boolean };
+};
 
 export default function TabsLayout() {
   const theme = useTheme();
+
+  const tabIcon =
+    (name: SymbolName) =>
+    ({ focused, color }: { focused: boolean; color: ColorValue }) => (
+      <View style={[styles.iconShell, focused && { backgroundColor: theme.primarySoft }]}>
+        <SymbolView name={name} size={20} weight={focused ? 'bold' : 'regular'} tintColor={color} />
+      </View>
+    );
+
+  // Sparring is the app's one loud action — a raised, "live" coral center button, not a flat tab.
+  // Its own color signals it's a different KIND of place (a conversation, not a study surface).
+  const SparringTabButton = ({ onPress, accessibilityState }: TabBarButtonProps) => {
+    const active = !!accessibilityState?.selected;
+    return (
+      <Pressable
+        onPress={onPress}
+        accessibilityRole="button"
+        accessibilityState={{ selected: active }}
+        accessibilityLabel={t('nav.sparring')}
+        style={styles.centerWrap}
+      >
+        {({ pressed }) => (
+          <View style={styles.centerCol}>
+            <View
+              style={[
+                styles.centerBtn,
+                { backgroundColor: theme.live, shadowColor: theme.live },
+                (pressed || active) && styles.centerBtnPressed,
+              ]}
+            >
+              <SymbolView
+                name={{ ios: 'waveform', android: 'graphic_eq', web: 'graphic_eq' }}
+                size={26}
+                weight="bold"
+                tintColor="#FFFFFF"
+              />
+            </View>
+            <Text style={[styles.centerLabel, { color: theme.live }]}>{t('nav.sparring')}</Text>
+          </View>
+        )}
+      </Pressable>
+    );
+  };
 
   return (
     <Tabs
@@ -34,13 +75,10 @@ export default function TabsLayout() {
           paddingTop: 8,
           paddingBottom: 12,
         },
-        tabBarLabelStyle: {
-          fontSize: 11,
-          fontWeight: '700',
-        },
+        tabBarLabelStyle: { fontSize: 11, fontWeight: '700' },
       }}
     >
-      {/* Home draws its own SafeAreaView + "Mimi" title — no native header. */}
+      {/* Order = tab-bar order: Today · Practice · [Sparring] · Review · Me */}
       <Tabs.Screen
         name="index"
         options={{
@@ -50,10 +88,19 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
-        name="videos"
+        name="practice"
         options={{
-          title: t('nav.library'),
-          tabBarIcon: tabIcon({ ios: 'play.rectangle.fill', android: 'smart_display', web: 'smart_display' }),
+          title: t('nav.practiceTab'),
+          tabBarIcon: tabIcon({ ios: 'graduationcap.fill', android: 'school', web: 'school' }),
+        }}
+      />
+      {/* The hero — its own studio room, no native header. */}
+      <Tabs.Screen
+        name="sparring"
+        options={{
+          headerShown: false,
+          title: t('nav.sparring'),
+          tabBarButton: (props) => <SparringTabButton {...props} />,
         }}
       />
       <Tabs.Screen
@@ -63,15 +110,6 @@ export default function TabsLayout() {
           tabBarIcon: tabIcon({ ios: 'arrow.triangle.2.circlepath', android: 'sync', web: 'sync' }),
         }}
       />
-      {/* Practice = the packs hub (Base verbs, Mix, Story, AI coding prompts…). A primary tab so the
-          study content is one tap away, not buried behind Today's "More practice" card. */}
-      <Tabs.Screen
-        name="practice"
-        options={{
-          title: t('nav.practiceTab'),
-          tabBarIcon: tabIcon({ ios: 'graduationcap.fill', android: 'school', web: 'school' }),
-        }}
-      />
       <Tabs.Screen
         name="settings"
         options={{
@@ -79,6 +117,8 @@ export default function TabsLayout() {
           tabBarIcon: tabIcon({ ios: 'person.fill', android: 'person', web: 'person' }),
         }}
       />
+      {/* Library folds into Home ("My clips") — reachable via router, off the tab bar. */}
+      <Tabs.Screen name="videos" options={{ href: null, title: t('nav.library') }} />
     </Tabs>
   );
 }
@@ -91,7 +131,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  iconShellActive: {
-    backgroundColor: '#E1EFFF',
+  centerWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  centerCol: { alignItems: 'center', transform: [{ translateY: -14 }] },
+  centerBtn: {
+    width: 56,
+    height: 56,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowOpacity: 0.5,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
   },
+  centerBtnPressed: { transform: [{ scale: 0.94 }], shadowOpacity: 0.35 },
+  centerLabel: { fontSize: 9.5, fontWeight: '800', marginTop: 3 },
 });
