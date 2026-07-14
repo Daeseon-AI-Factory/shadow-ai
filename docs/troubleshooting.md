@@ -2083,3 +2083,46 @@ Tests  40 passed (40)
 **Commit.** `f2055fa8b28270fb74f41b22936cc43638b16fac`
 
 <!-- override-trigger: 76ae949 Merge branch 'codex/ux-u1' into integration/tracks — 통합 커밋. 422 LOC는 U1(useMastery·sparringReport 래퍼·vitest12)의 자체 커밋 f2055fa/5658a17이 이미 로깅한 변경분이며, U1의 mdx(2026-07-14-u1-mastery-data-layer.mdx)와 troubleshooting 항목이 이 머지로 함께 들어옴. 중복 로깅 불필요. -->
+
+---
+
+## 2026-07-14 — 낙관 채점의 SRS 갱신이 드릴 세션 키를 바꿔 진행률을 초기화함
+
+**Symptom.** U3의 첫 iOS Simulator 오답 재큐 검증에서 다음 assertion이 실패했고, 캡처의
+카운터는 다음 카드로 넘어간 직후 다시 `1 / 30`을 표시했다.
+
+```text
+Assertion is false: "2 / 31" is visible
+```
+
+**Cause (verified).** `mobile/src/app/today.tsx`는 `srs.data`로 세션을 다시 만들고 카드 key 전체를
+`DrillRunner`의 React key로 사용한다. 기존 `drill-runner.tsx`는 채점 성공 시 공유 `['srs']`
+query를 즉시 invalidate/refetch했다. 낙관적으로 다음 카드를 먼저 연 상태에서 이 데이터가
+바뀌면 부모가 다른 key로 runner를 다시 mount해 로컬 `pos`, `queue`, 진행률을 초기화할 수 있었다.
+또한 runner의 자체 `useQuery(['srs'])`도 캐시가 있어도 mount refetch를 시작하는 경합이 있었다.
+
+**Fix.** 구현 커밋 `07229bd15d60a0c8eb02e8d6b5d3cc32fc11e843`에서
+`mobile/src/components/drill-runner.tsx`가 세션 시작 시 SRS snapshot을 잡고, 채점 결과는 그
+snapshot에만 합친다. 공유 query는 `refetchType: 'none'`으로 stale 표시만 하며, runner의 fallback
+조회는 snapshot이 없을 때만 활성화한다. 같은 커밋은 단조 진행바·워밍업 credit·막판 강조·낙관
+채점 오류 queue와 `session-summary.tsx`의 드릴/스파링 peak-end 화면을 추가했다.
+
+**Verification.** 최종 코드에서 `npx tsc --noEmit`과 `git diff --check`는 stdout 없이 exit 0이었다.
+Mimi R3 Visual iOS 26.5 Simulator의 한 세션은 다음 순서로 exit 0을 기록했다.
+
+```text
+Assert that ".*1 / 13.*" is visible... COMPLETED
+Assert that ".*2 / 14.*" is visible... COMPLETED
+Assert that ".*12 / 14.*" is visible... COMPLETED
+Assert that "3 left!" is visible... COMPLETED
+Assert that "SESSION COMPLETE" is visible... COMPLETED
+Tap on "Done"... COMPLETED
+Assert that "Hi, U2 Simulator" is visible... COMPLETED
+```
+
+스파링 리포트의 실제 성공·실패 네트워크 응답, Android, light appearance는 [unverified]다.
+
+**Commit.** `07229bd15d60a0c8eb02e8d6b5d3cc32fc11e843`.
+
+**Pattern.** 부모가 child key를 shared query 결과로 만들면, 낙관 UI 중 그 query를 갱신하지 말고
+세션 로컬 snapshot과 종료 후 authoritative reconciliation을 분리해야 한다.

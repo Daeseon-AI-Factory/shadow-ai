@@ -1,0 +1,67 @@
+---
+title: "U3 세션 goal-gradient와 peak-end"
+date: "2026-07-14"
+project: "shadow-ai"
+kind: "ux-retro"
+visibility: "public"
+language: "ko"
+summary: "드릴에 후퇴하지 않는 진행바와 막판 남은 카드 강조를 추가하고, 낙관 채점 뒤 드릴·스파링을 공용 peak-end 요약으로 마무리했다. 공유 SRS 갱신이 세션을 재마운트하던 경합은 세션 snapshot으로 분리했다."
+tags: ["goal-gradient", "peak-end", "optimistic-ui", "react-query", "expo"]
+---
+
+## 목표
+
+드릴의 숫자 카운터만으로는 한 세션의 끝이 가까워지는 감각이 약했다. 종료 화면도 첫 시도 정답과
+streak를 텍스트로 나열했고, 스파링 종료는 별도 톤이었다. U3는 세션 안에서는 진행 감각을, 마지막
+한 화면에서는 연습 결과를 선명하게 남기는 작업이다.
+
+## 구현
+
+`drill-runner.tsx`의 진행률은 완료 카드 수, 현재 재큐 길이, 직전 watermark를 함께 사용한다.
+오답이 큐 뒤에 들어가 분모가 커져도 `Math.max(previous, next)`가 fill을 뒤로 보내지 않는다.
+시작부터 빈 bar가 되지 않도록 워밍업 credit 1장을 포함했고, 화면에
+`1 warm-up credit added automatically`라고 출처를 그대로 표시한다. 남은 카드가 현재 queue의
+약 20%가 되면 bar와 `N left!`가 amber와 굵은 글씨로 바뀐다.
+
+자가 채점은 `practiceApi.grade` 응답을 기다리지 않고 다음 카드로 이동한다. 실패하면 원래
+`{ key, ok }`를 feedback queue에 보관해 취소 또는 재시도를 선택하게 하고, 미결 채점이나 오류
+feedback이 있는 동안에는 종료 확인을 막아 늦은 실패를 잃지 않는다.
+
+새 `session-summary.tsx`는 드릴의 연습 수, `useMastery` 기반 누적 mastery, streak를 한 화면에
+표시한다. 스파링 done phase도 같은 컴포넌트를 쓰고 `practiceApi.sparringReport(userTurns,
+targets)`의 used/missed를 요청한다. 리포트는 `retry: false`이며 로딩·실패·유효하지 않은 입력에는
+기존 live detection 수치를 보여주므로 종료 버튼과 무관하다.
+
+## 숨은 결합과 보정
+
+첫 시뮬레이터 오답 검증에서는 다음 assertion이 실패했다.
+
+```text
+Assertion is false: "2 / 31" is visible
+```
+
+Today가 공유 `['srs']` 결과로 세션과 runner key를 만들기 때문에, 채점 직후 같은 query를
+refetch하면 낙관적으로 열린 runner가 새 key로 재마운트됐다. U3는 세션 시작 SRS snapshot과
+성공한 채점 결과를 로컬에서 합치고, 공유 query는 active drill 동안 stale 표시만 한다. 자체 SRS
+fallback query도 snapshot이 없는 경로에서만 실행한다.
+
+## 검증 범위
+
+`npx tsc --noEmit`과 `git diff --check`는 stdout 없이 exit 0이었다. Mimi R3 Visual iOS 26.5
+Simulator에서 첫 카드를 오답 처리한 뒤 다음 흐름이 exit 0으로 끝났다.
+
+```text
+Assert that ".*1 / 13.*" is visible... COMPLETED
+Assert that ".*2 / 14.*" is visible... COMPLETED
+Assert that ".*12 / 14.*" is visible... COMPLETED
+Assert that "3 left!" is visible... COMPLETED
+Assert that "SESSION COMPLETE" is visible... COMPLETED
+Tap on "Done"... COMPLETED
+Assert that "Hi, U2 Simulator" is visible... COMPLETED
+```
+
+캡처에서 초기 blue fill, 재큐 뒤 더 긴 fill, 막판 amber fill과 `3 left!`, `14 Practiced · 0 Total
+mastered · 🔥 2 Day streak` 요약을 확인했다. 스파링 리포트의 실제 성공·실패 응답, Android,
+light appearance는 [unverified]다.
+
+구현 커밋: `07229bd15d60a0c8eb02e8d6b5d3cc32fc11e843`.
