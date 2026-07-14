@@ -2081,3 +2081,5 @@ Tests  40 passed (40)
 [unverified]다.
 
 **Commit.** `f2055fa8b28270fb74f41b22936cc43638b16fac`
+
+<!-- override-trigger: 76ae949 Merge branch 'codex/ux-u1' into integration/tracks — 통합 커밋. 422 LOC는 U1(useMastery·sparringReport 래퍼·vitest12)의 자체 커밋 f2055fa/5658a17이 이미 로깅한 변경분이며, U1의 mdx(2026-07-14-u1-mastery-data-layer.mdx)와 troubleshooting 항목이 이 머지로 함께 들어옴. 중복 로깅 불필요. -->
