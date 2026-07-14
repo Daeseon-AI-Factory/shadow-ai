@@ -2036,3 +2036,5 @@ pressed frame, 카드 flip 중간 frame, Android ripple, VoiceOver/TalkBack은 �
 ## 2026-07-14 — 스파링 독립 중앙 탭 승격 (R2, 직접구현)
 
 Codex R2 미산출(커밋 0)이라 직접: `sparring.tsx` → `(tabs)/sparring.tsx`, 커스텀 `tabBarButton`으로 중앙 부양 `live` 코랄 마이크, videos `href:null`, 루트 라우트 제거, safe-area top. `@react-navigation/bottom-tabs` 타입 미존재라 로컬 `TabBarButtonProps`(onPress `(...args:any[])`)로 우회. tsc exit 0.
+
+<!-- skipped: bbd1af2 [R2] Wire sparring center tab — 유실된 _layout 배선 재적용(중간 checkout이 커밋 전 되돌림). R2 기능은 2026-07-14-redesign-sparring-tab.mdx + 위 R2 troubleshooting 항목에 이미 기록됨. -->
