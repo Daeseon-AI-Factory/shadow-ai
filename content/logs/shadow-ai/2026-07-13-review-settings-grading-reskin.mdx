@@ -1,0 +1,51 @@
+---
+title: "Review·Me·drill 채점 표면을 공용 토큰으로 통일"
+date: "2026-07-13"
+project: "shadow-ai"
+kind: "ux-retro"
+visibility: "public"
+language: "ko"
+summary: "Review 카드 flip과 semantic grade 색을 추가하고, Me 섹션과 두 drill runner를 R1 Card·Chip·Button 계약으로 통일했다."
+tags: ["mobile", "review", "design-system", "accessibility"]
+---
+
+## 문제
+
+Review와 두 drill runner는 같은 자가 채점 흐름인데도 각각 raw `Pressable`과 하드코딩 색을
+사용했다. Again/Hard/Good/Easy의 시각 언어가 공용 컴포넌트와 분리돼 있었고, Me 화면은 theme
+input을 쓰면서도 통계·프로필·비밀번호·계정 조작이 하나의 긴 평면 목록으로 보였다.
+
+## 변경
+
+구현 커밋 `6083d3252c9fb7f1b66b291d1046ae4546da080f`은 네 화면 파일만 변경했다.
+
+- Review는 Again=live, Hard=amber, Good=primary, Easy=mint로 연결하고 버튼 높이·굵기·테두리를
+  올렸다. 답 공개는 140ms 반쪽 회전 두 번으로 구성하며 reduced-motion에서는 즉시 전환한다.
+- Me는 학습 현황, 플랜, 이름, 비밀번호, 로그아웃, 삭제를 Card 섹션으로 묶고 모든 TextInput 색을
+  theme에서 가져온다.
+- DrillRunner와 InterviewDrill은 기존 채점 mutation을 유지하면서 Card, Chip, PrimaryButton으로
+  표현만 교체했다. AI check 입력과 결과 카드도 light/dark token을 사용한다.
+
+## 검증
+
+Expo SDK `56.0.12` / React Native `0.85.3` 환경에서 TypeScript 검사는 stdout 없이 exit 0이었다.
+
+```text
+$ npx tsc --noEmit --pretty false
+[exit 0; stdout empty]
+
+iOS Bundled 27850ms node_modules/expo-router/entry.js (1645 modules)
+Exported: /tmp/r4-export-ios
+Android Bundled 27767ms node_modules/expo-router/entry.js (1730 modules)
+Exported: /tmp/r4-export-android
+```
+
+지정 네 파일의 임시 QA marker와 raw color 정적 검사는 `QA markers/raw colors: none`을 출력했다.
+iOS Simulator 캡처에서 Me의 section card와 input을 light/dark 양쪽에서 확인했다.
+
+## 확인하지 않은 것
+
+모든 grade 버튼의 실제 손가락 pressed frame, Review flip의 중간 animation frame, Android 실제 기기
+ripple, VoiceOver/TalkBack, 실제 서버에 grade를 기록하는 종단간 흐름은 확인하지 않았다. 공용
+feedback source에는 pressed opacity/scale과 Android ripple이 연결돼 있지만, 이는 runtime 촉감
+검증을 대신하지 않는다.

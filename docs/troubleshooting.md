@@ -1908,3 +1908,46 @@ rawHexMatches=0
 `git diff --check`도 stdout 없이 exit 0이었다. 실제 iOS/Android light/dark 렌더, 손가락 press 체감, 키보드 focus ring은 [unverified]다. R2–R4 화면 통합과 전역 screen raw-color acceptance도 이 R1 범위에서는 [unverified]다.
 
 **Commit.** This R1 commit; git history records the immutable hash.
+
+---
+
+## 2026-07-13 — Review·drill 채점 버튼과 Me 입력이 화면별 raw style로 갈라짐
+
+**Symptom.** Review와 두 drill runner는 같은 자가 채점 동작을 서로 다른 raw `Pressable`과
+하드코딩 색으로 표시했고, Me는 통계·계정·입력·삭제 영역을 평평한 `View`로 나열했다. 구현 전
+소스에는 아래 값이 화면별로 직접 들어 있었다.
+
+```text
+Again #dc2626
+Hard #f59e0b
+Good #208AEF
+Easy #10b981
+TextInput color #111827 / background #fff / border #9ca3af
+```
+
+**Cause (verified).** `review.tsx`, `drill-runner.tsx`, `interview-drill.tsx`가 R1의 `Card`, `Chip`,
+`PrimaryButton` 대신 자체 Pressable style을 유지했고, `settings.tsx`도 L6 theme 값을 입력에만
+적용한 채 섹션 구조와 버튼 피드백은 화면 로컬 style로 남겨 두었다. `git diff`에서 위 네 파일의
+기존 raw style과 교체된 공용 컴포넌트 import를 직접 확인했다.
+
+**Fix.** 구현 커밋 `6083d3252c9fb7f1b66b291d1046ae4546da080f`에서 Review의
+Again/Hard/Good/Easy를 각각 live/amber/primary/mint `Chip`으로 바꾸고 2단계 Y축 카드 flip,
+reduced-motion 우회, focus/blur 세대 가드를 추가했다. Me는 학습 통계·플랜·프로필·비밀번호·로그아웃·
+삭제를 `Card` 섹션으로 묶고 theme 기반 입력과 공용 버튼을 사용한다. 두 drill runner는 기존
+`practiceApi.grade` 호출과 성공 후 진행 순서를 유지한 채 같은 Card/Chip/Button 표현으로 바꿨다.
+
+**Verification.** `npx tsc --noEmit --pretty false`는 stdout 없이 exit 0이었다. Expo SDK는
+`56.0.12`, React Native는 `0.85.3`이었고 최종 export는 다음 출력으로 끝났다.
+
+```text
+iOS Bundled 27850ms node_modules/expo-router/entry.js (1645 modules)
+Exported: /tmp/r4-export-ios
+Android Bundled 27767ms node_modules/expo-router/entry.js (1730 modules)
+Exported: /tmp/r4-export-android
+```
+
+지정 네 파일의 임시 QA marker와 raw color 정적 검사는 `QA markers/raw colors: none`을 출력했다.
+iOS Simulator 캡처에서 Me의 상·하단을 light와 dark로 확인했다. 모든 grade 버튼의 실제 손가락
+pressed frame, 카드 flip 중간 frame, Android ripple, VoiceOver/TalkBack은 확인하지 않았다.
+
+**Commit.** `6083d3252c9fb7f1b66b291d1046ae4546da080f`.
