@@ -2040,3 +2040,43 @@ Codex R2 미산출(커밋 0)이라 직접: `sparring.tsx` → `(tabs)/sparring.t
 <!-- skipped: bbd1af2 [R2] Wire sparring center tab — 유실된 _layout 배선 재적용(중간 checkout이 커밋 전 되돌림). R2 기능은 2026-07-14-redesign-sparring-tab.mdx + 위 R2 troubleshooting 항목에 이미 기록됨. -->
 <!-- skipped: d84d70a chore(log): mark bbd1af2 as re-apply of already-logged R2 [no-log] -->
 <!-- skipped: 31e1ac2 docs: motivation & usability spec — mastery visibility, goal-gradient, peak-end, ease laws (U1-U4) [no-log] -->
+
+---
+
+## 2026-07-14 — 정적 SRS 팩 전체 집계가 없고 Vitest 기대값이 두 팩에 머묾
+
+**Symptom.** U1 구현 전 전체 frontend Vitest가 다음 출력으로 실패했다.
+
+```text
+FAIL  tests/practice-cards.test.ts > cardIndex > indexes every item across both decks
+AssertionError: expected 4233 to be 448 // Object.is equality
+Test Files  1 failed | 5 passed (6)
+Tests  1 failed | 31 passed (32)
+```
+
+**Cause (verified).** `frontend/tests/practice-cards.test.ts`의 기대값은 pattern과 collocation만
+더했지만, `packages/core/src/practice-cards.ts`의 `cardIndex()`는 이미 8개 정적 SRS 팩을 모두
+인덱싱했다. core에는 이 정적 크기와 `SrsCard` 상태를 결합해 mastery를 계산하는 공용 selector도
+없었다. `PracticeProgress.reps`는 타입과 백엔드 DTO 주석 모두 오늘 횟수이므로 실제 주간 합계로
+바꿀 근거가 없었다.
+
+**Fix.** `packages/core/src/practice-mastery.ts`에 8개 정적 팩 크기, `selectMastery`, React 의존성
+없는 `useMastery` wrapper, `selectPracticeRhythm`/`selectWeeklyRhythm`을 추가했다. 실제
+`cardIndex()`에 있는 키만 집계하고, box 1~3은 learning, box 4 이상은 mastered로 분류한다.
+상태 없는 카드는 `total - mastered - learning`으로 new가 된다. 리듬 요약은 일간 값을
+`repsToday`로 명시한다. `packages/core/src/api/practice.ts`에는 실제 F1 DTO에 맞춘
+`practiceApi.sparringReport(userTurns, targets)`를 추가했다. selector·팩 집계·빈 상태·상태 없는
+카드·API body 회귀 테스트를 추가하고 기존 cardIndex 기대값을 전체 정적 팩 크기로 교체했다.
+
+**Verification.** 최종 출력은 다음과 같았다.
+
+```text
+Test Files  8 passed (8)
+Tests  40 passed (40)
+```
+
+`npx tsc --noEmit --pretty false --incremental false`는 stdout 없이 exit 0이었고,
+`git diff --check`도 stdout 없이 exit 0이었다. 화면 수준 동작과 실제 F1 네트워크 호출은
+[unverified]다.
+
+**Commit.** `f2055fa8b28270fb74f41b22936cc43638b16fac`
