@@ -1,0 +1,74 @@
+---
+title: "R3 Home 우선순위와 Practice 팩 그리드"
+date: "2026-07-13"
+project: "shadow-ai"
+kind: "ux-retro"
+visibility: "public"
+language: "ko"
+summary: "Home 첫 화면을 streak와 one-tap Sparring 중심으로 재구성하고, Practice를 팩별 count·due 메타가 있는 균일 그리드로 바꿨다."
+tags: ["expo", "react-native", "home", "practice", "srs"]
+---
+
+## 경계
+
+R3는 Home, Practice와 필요한 en/ko 문자열만 소유한다. R1의 semantic tokens, Card, Chip,
+TalkButton을 import했고 tab layout, Sparring 본체, Review, Settings, theme과 공용 컴포넌트 정의는
+수정하지 않았다. 브랜치는 R1 구현·로그 커밋 위로 rebase했다.
+
+## Home: 고정된 첫 화면 우선순위
+
+기존 Home은 review due, recent clip, latest video 결과에 따라 하나의 primary CTA를 바꿨다. 새 Home은
+첫 viewport를 안정적으로 유지한다. 첫 카드는 ink gradient 위 amber flame, tabular day count와
+`N due today`를 보여준다. 바로 아래 live surface에는 waveform과 TalkButton을 두고 `/sparring`으로
+보낸다. 세 번째 행은 Today's 30, My clips, Weak spots의 조용한 3열 타일이다.
+
+데이터 복원력은 버리지 않았다. `me`, `streak`, `recent` query, token hydration, explicit retry,
+focus refetch를 유지했다. greeting과 streak 실패만 전체 ErrorState로 처리하고, 보조 clip count가
+실패하면 My clips 메타만 `—`가 된다. My clips는 명세의 기존 videos screen 링크를 그대로 쓰며,
+대상 화면이 기본 Videos section을 여는 한계는 R3 범위 밖으로 남겼다.
+
+## Practice: 두 due 도메인을 섞지 않기
+
+Practice의 15개 top-level destination을 같은 높이의 2열 Card grid로 바꾸고 Sparring 카드만
+제거했다. workshop의 collocation/preposition/trap/argument/particle parameter route는 그대로
+보존했다.
+
+팩 메타는 정적 count와 drill-card SRS due를 결합한다. Home streak의 `dueToday`는 clip review
+queue이고 Practice의 due는 `srsStates()`에서 `dueDate <= localToday()`인 card다. 따라서 pack별
+`pat:`, `col:`, `pv:`, `ep:`, `p5:`, `itp:`, `itt:`, `aic:` namespace를 따로 세었다. 현재
+`cardIndex()`에 없는 stale key는 제외하고, Practice로 돌아올 때 SRS를 다시 읽는다. utility
+destination은 가짜 `0 due`를 만들지 않고 기존 설명문을 유지한다.
+
+## Expo 56와 light/dark 검증
+
+설치된 Expo 56.0.12 / React Native 0.85.3 소스에서 `expo-symbols/androidWeights/bold` export와
+object weight contract를 확인해 iOS bold와 Android 700 font를 함께 전달했다. Android export에는
+실제로 `MaterialSymbols_700Bold.ttf`가 포함됐다.
+
+첫 다크 전환에서 experimental gradient가 plain streak text 위에 합성되는 현상이 보였다.
+content row를 foreground zIndex에 올린 뒤 전용 iPhone 17 Pro Max iOS 26.5 Simulator에서
+Home/Practice light와 dark를 다시 캡처했고, streak label/number, hero, 타일, grid와 메타가 모두
+표시됐다. 내부 합성 원인은 확인하지 못했으므로 gradient에는 ink fallback을 유지했다.
+
+```text
+$ npx tsc --noEmit
+[exit 0; stdout empty]
+
+iOS Bundled 164338ms node_modules/expo-router/entry.js (1296 modules)
+Exported: /private/tmp/shadow-r3-ios-export
+
+Android Bundled 167253ms node_modules/expo-router/entry.js (1733 modules)
+Exported: /private/tmp/shadow-r3-android-export
+
+Tap on "Start talking"... COMPLETED
+Assert that "Topic" is visible... COMPLETED
+Tap on point (50%,65%)... COMPLETED
+Assert that "Library" is visible... COMPLETED
+```
+
+Android 실기기 렌더, Dynamic Type, screen reader, R2의 center tab과 합친 최종 화면은
+[unverified]다. RN 0.85 문서는 `experimental_backgroundImage`의 production 사용을 경고하지만,
+현재 허용 파일과 직접 의존성 안에는 stable gradient 컴포넌트가 없어 이 요구는 실험 API와 solid
+ink fallback으로 구현했다.
+
+Commit: `20be4750db9c66d928c1950be578e5c6cda1d67d`

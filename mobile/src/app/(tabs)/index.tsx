@@ -1,14 +1,18 @@
 import { useCallback } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Redirect, router, useFocusEffect } from 'expo-router';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
+import boldSymbolWeight from 'expo-symbols/androidWeights/bold';
 import { useQuery } from '@tanstack/react-query';
-import { authApi, clipsApi, libraryApi, reviewApi } from '@shadow-ai/core';
+import { authApi, clipsApi, reviewApi } from '@shadow-ai/core';
 
+import { Card } from '@/components/card';
+import { ErrorState } from '@/components/error-state';
+import { TalkButton } from '@/components/talk-button';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { ErrorState } from '@/components/error-state';
+import { Colors } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useAuthStore } from '@/lib/auth-store';
 import { haptic } from '@/lib/haptics';
@@ -16,11 +20,12 @@ import { t } from '@/lib/i18n';
 
 type SymbolName = SymbolViewProps['name'];
 const SCREENSHOT_DISPLAY_NAME = process.env.EXPO_PUBLIC_SCREENSHOT_DISPLAY_NAME;
+const WAVEFORM_HEIGHTS = [12, 26, 18, 34, 22, 30, 14] as const;
+const SYMBOL_WEIGHT = { ios: 'bold', android: boldSymbolWeight } as const;
 
 /**
- * Today — the home screen leads with ONE action, not a grid of features. We pick the single most
- * useful next step (reviews due → open newest clip → pick a line → import a first video) so the user
- * knows what to tap in a second. Everything else is one tap behind the two slim cards below.
+ * Today keeps the existing resilient query flow, but gives the first viewport a stable hierarchy:
+ * streak, one-tap Sparring, then the three quiet destinations used every day.
  */
 export default function TodayScreen() {
   const token = useAuthStore((s) => s.token);
@@ -42,27 +47,20 @@ export default function TodayScreen() {
     enabled: !!token,
     retry: false,
   });
-  // size:1 with the default "newest" sort → the most recent clip, used as the "continue" target.
+  // size:1 with the default "newest" sort keeps the existing recent-clip state user-scoped.
   const recent = useQuery({
     queryKey: ['clips', 'recent'],
     queryFn: () => clipsApi.list({ size: 1 }),
     enabled: !!token,
     retry: false,
   });
-  const latestVideo = useQuery({
-    // Keep this distinct from Videos' size:50 cache while retaining import's prefix invalidation.
-    queryKey: ['library', 'videos', 'latest'],
-    queryFn: () => libraryApi.list({ page: 0, size: 1 }),
-    enabled: !!token,
-    retry: false,
-  });
   // Expo Router keeps Home mounted. Refresh the decision inputs whenever the learner returns from
-  // importing, clipping, or reviewing so the next action reflects the work they just completed.
+  // clipping or reviewing so the counts reflect the work they just completed.
   useFocusEffect(
     useCallback(() => {
       if (!token) return;
-      void Promise.all([streak.refetch(), recent.refetch(), latestVideo.refetch()]);
-    }, [token, streak.refetch, recent.refetch, latestVideo.refetch]),
+      void Promise.all([streak.refetch(), recent.refetch()]);
+    }, [token, streak.refetch, recent.refetch]),
   );
 
   if (!hydrated) {
@@ -75,32 +73,16 @@ export default function TodayScreen() {
   if (!token) return <Redirect href="/login" />;
 
   const due = streak.data?.dueToday ?? 0;
-  const recentClip = recent.data?.items?.[0];
-  const savedVideo = latestVideo.data?.items?.[0];
-  const readyVideo = savedVideo?.video.transcriptStatus === 'READY' ? savedVideo : null;
-  // Use only the server-scoped result. The legacy on-device lastClip key is not user-scoped and
-  // can point a newly signed-in account at another user's inaccessible clip.
-  const resume = recentClip
-    ? { id: recentClip.id, name: recentClip.name || recentClip.videoTitle || '' }
-    : null;
-  // Library is only load-bearing when there is no review or clip to resume. A supplemental
-  // library outage must not hide a working higher-priority action.
-  const recentBlocksPrimary = recent.isError && !recentClip && due === 0 && !streak.isPending;
-  const latestVideoBlocksPrimary =
-    latestVideo.isError &&
-    !savedVideo &&
-    due === 0 &&
-    !resume &&
-    !streak.isPending &&
-    !recent.isPending;
 
-  if ((me.isError && !me.data) || (streak.isError && !streak.data) || recentBlocksPrimary || latestVideoBlocksPrimary) {
+  // Greeting and streak are load-bearing. A supplemental clip-count outage should not hide the
+  // stable Home destinations; the My clips tile renders an explicit unavailable marker instead.
+  if ((me.isError && !me.data) || (streak.isError && !streak.data)) {
     return (
       <ThemedView style={styles.flex}>
         <SafeAreaView style={styles.flex} edges={['top']}>
           <ErrorState
             onRetry={() => {
-              void Promise.all([me.refetch(), streak.refetch(), recent.refetch(), latestVideo.refetch()]);
+              void Promise.all([me.refetch(), streak.refetch(), recent.refetch()]);
             }}
           />
         </SafeAreaView>
@@ -109,110 +91,122 @@ export default function TodayScreen() {
   }
 
   const streakDays = streak.data?.streakDays ?? 0;
-  const settling =
-    streak.isPending ||
-    (due === 0 && recent.isPending) ||
-    (due === 0 && !resume && latestVideo.isPending);
-
-  // The one action that matters most right now.
-  const primary: PrimaryAction =
-    due > 0
-      ? {
-          icon: { ios: 'arrow.triangle.2.circlepath', android: 'sync', web: 'sync' },
-          title: t('today.reviewCta', { n: due }),
-          sub: t('today.reviewSub'),
-          onPress: () => router.push('/review'),
-        }
-      : resume
-        ? {
-            icon: { ios: 'play.fill', android: 'play_arrow', web: 'play_arrow' },
-            title: t('today.resumeCta'),
-            sub: resume.name || t('today.resumeSub'),
-            onPress: () => router.push(`/player/${resume.id}`),
-          }
-        : readyVideo
-          ? {
-              icon: { ios: 'scissors', android: 'content_cut', web: 'content_cut' },
-              title: t('today.pickLineCta'),
-              sub: t('today.pickLineSub'),
-              onPress: () => router.push(`/video/${readyVideo.video.id}`),
-            }
-          : savedVideo
-            ? {
-                icon: { ios: 'arrow.clockwise', android: 'refresh', web: 'refresh' },
-                title: t('today.tryAnotherCta'),
-                sub: t('today.tryAnotherSub'),
-                onPress: () => router.push('/import'),
-              }
-          : {
-              icon: { ios: 'plus', android: 'add', web: 'add' },
-              title: t('today.importCta'),
-              sub: t('today.importSub'),
-              onPress: () => router.push('/import'),
-            };
-
-  const streakText =
-    streakDays > 0 || due > 0 ? t('today.streakLine', { days: streakDays, due }) : t('today.streakEmpty');
+  const clipMeta = recent.data
+    ? t('videos.clipCount', { count: recent.data.total })
+    : recent.isPending
+      ? '…'
+      : '—';
 
   return (
     <ThemedView style={styles.flex}>
       <SafeAreaView style={styles.flex} edges={['top']}>
         <ScrollView contentContainerStyle={styles.container}>
           <View style={styles.head}>
-            <ThemedText style={[styles.eyebrow, { color: theme.primary }]} maxFontSizeMultiplier={1.4}>
+            <ThemedText type="label" style={{ color: theme.primary }} maxFontSizeMultiplier={1.4}>
               Mimi
             </ThemedText>
-            <ThemedText type="title" style={styles.greeting} maxFontSizeMultiplier={1.25}>
+            <ThemedText type="section" maxFontSizeMultiplier={1.25}>
               {me.data ? t('today.hi', { name: SCREENSHOT_DISPLAY_NAME || me.data.displayName }) : t('today.hiPlain')}
-            </ThemedText>
-            <ThemedText type="small" themeColor="textSecondary" maxFontSizeMultiplier={1.5}>
-              {streakText}
             </ThemedText>
           </View>
 
-          {/* The single primary action. */}
-          {settling ? (
-            <View style={[styles.hero, styles.heroLoading, { backgroundColor: theme.primary }]}>
-              <ActivityIndicator color="#fff" />
+          <Card
+            accent="amber"
+            style={[
+              styles.streakCard,
+              {
+                backgroundColor: theme.ink,
+                borderColor: Colors.dark.border,
+                // Expo 56 ships RN 0.85. Keep an ink fallback because this gradient API is experimental.
+                experimental_backgroundImage: `linear-gradient(135deg, ${theme.ink}, ${Colors.dark.backgroundSelected})`,
+              },
+            ]}
+          >
+            <View style={styles.streakLabelRow}>
+              <SymbolView
+                name={{ ios: 'flame.fill', android: 'local_fire_department', web: 'local_fire_department' }}
+                size={22}
+                weight={SYMBOL_WEIGHT}
+                tintColor={theme.amber}
+              />
+              <ThemedText type="label" style={{ color: Colors.dark.textSecondary }}>
+                {t('me.streakDays')}
+              </ThemedText>
             </View>
-          ) : (
-            <Pressable
-              style={[styles.hero, { backgroundColor: theme.primary }]}
+            {streak.isPending ? (
+              <View style={styles.streakLoading}>
+                <ActivityIndicator color={Colors.dark.text} />
+              </View>
+            ) : (
+              <View style={styles.streakStats}>
+                <ThemedText
+                  type="display"
+                  style={[styles.streakNumber, { color: Colors.dark.text }]}
+                  maxFontSizeMultiplier={1.2}
+                >
+                  {streakDays}
+                </ThemedText>
+                <View style={[styles.duePill, { backgroundColor: theme.amber }]}>
+                  <ThemedText type="label" style={{ color: theme.onAmber }} maxFontSizeMultiplier={1.35}>
+                    {t('today.dueToday', { n: due })}
+                  </ThemedText>
+                </View>
+              </View>
+            )}
+          </Card>
+
+          <View
+            style={[
+              styles.sparringCard,
+              { backgroundColor: theme.liveSoft, borderColor: theme.live },
+            ]}
+          >
+            <View style={styles.sparringTop}>
+              <View style={styles.sparringCopy}>
+                <ThemedText type="section" maxFontSizeMultiplier={1.2}>
+                  {t('home.sparring')}
+                </ThemedText>
+                <ThemedText type="small" maxFontSizeMultiplier={1.35}>
+                  {t('home.sparringSub')}
+                </ThemedText>
+              </View>
+              <Waveform color={theme.live} />
+            </View>
+            <TalkButton
+              label={t('today.startTalking')}
+              leading={(
+                <SymbolView
+                  name={{ ios: 'mic.fill', android: 'mic', web: 'mic' }}
+                  size={20}
+                  weight={SYMBOL_WEIGHT}
+                  tintColor={theme.onLive}
+                />
+              )}
               onPress={() => {
                 haptic.light();
-                primary.onPress();
+                router.push('/sparring');
               }}
-              accessibilityRole="button"
-              accessibilityLabel={primary.title}
-            >
-              <View style={styles.heroText}>
-                <ThemedText style={styles.heroKicker} maxFontSizeMultiplier={1.2}>
-                  {t('today.todayKicker')}
-                </ThemedText>
-                <ThemedText style={styles.heroTitle} maxFontSizeMultiplier={1.25}>
-                  {primary.title}
-                </ThemedText>
-                <ThemedText style={styles.heroSub} numberOfLines={2} maxFontSizeMultiplier={1.35}>
-                  {primary.sub}
-                </ThemedText>
-              </View>
-              <View style={styles.heroGo}>
-                <SymbolView name={primary.icon} size={26} weight="bold" tintColor="#FFFFFF" />
-              </View>
-            </Pressable>
-          )}
+            />
+          </View>
 
-          {/* Everything else is one tap behind these two. */}
-          <View style={styles.row}>
-            <MiniCard
+          <View style={styles.tiles}>
+            <HomeTile
+              icon={{ ios: 'sun.max.fill', android: 'wb_sunny', web: 'wb_sunny' }}
+              title={t('iv.modeDue')}
+              meta={t('home.todaySub')}
+              onPress={() => router.push('/today')}
+            />
+            <HomeTile
               icon={{ ios: 'rectangle.stack.fill', android: 'view_carousel', web: 'view_carousel' }}
-              title={t('today.library')}
+              title={t('today.myClips')}
+              meta={clipMeta}
               onPress={() => router.push('/videos')}
             />
-            <MiniCard
-              icon={{ ios: 'bolt.fill', android: 'bolt', web: 'bolt' }}
-              title={t('today.morePractice')}
-              onPress={() => router.push('/practice')}
+            <HomeTile
+              icon={{ ios: 'scope', android: 'gps_fixed', web: 'gps_fixed' }}
+              title={t('home.weakSpots')}
+              meta={t('home.weakSpotsSub')}
+              onPress={() => router.push('/weak')}
             />
           </View>
         </ScrollView>
@@ -221,70 +215,97 @@ export default function TodayScreen() {
   );
 }
 
-type PrimaryAction = { icon: SymbolName; title: string; sub: string; onPress: () => void };
-
-function MiniCard({ icon, title, onPress }: { icon: SymbolName; title: string; onPress: () => void }) {
-  const theme = useTheme();
+function Waveform({ color }: { color: string }) {
   return (
-    <Pressable
-      style={[styles.mini, { borderColor: theme.border, backgroundColor: theme.surfaceRaised }]}
+    <View style={styles.waveform} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+      {WAVEFORM_HEIGHTS.map((height, index) => (
+        <View key={`${height}-${index}`} style={[styles.waveBar, { backgroundColor: color, height }]} />
+      ))}
+    </View>
+  );
+}
+
+function HomeTile({
+  icon,
+  title,
+  meta,
+  onPress,
+}: {
+  icon: SymbolName;
+  title: string;
+  meta: string;
+  onPress: () => void;
+}) {
+  const theme = useTheme();
+
+  return (
+    <Card
+      style={styles.tile}
       onPress={() => {
         haptic.tap();
         onPress();
       }}
-      accessibilityRole="button"
-      accessibilityLabel={title}
+      accessibilityLabel={`${title}. ${meta}`}
     >
-      <View style={[styles.miniIcon, { backgroundColor: theme.primarySoft }]}>
-        <SymbolView name={icon} size={20} weight="bold" tintColor={theme.primary} />
+      <View style={[styles.tileIcon, { backgroundColor: theme.primarySoft }]}>
+        <SymbolView name={icon} size={20} weight={SYMBOL_WEIGHT} tintColor={theme.primary} />
       </View>
-      <ThemedText type="smallBold" maxFontSizeMultiplier={1.4}>{title}</ThemedText>
-    </Pressable>
+      <ThemedText type="smallBold" numberOfLines={2} maxFontSizeMultiplier={1.25}>
+        {title}
+      </ThemedText>
+      <ThemedText
+        type="label"
+        themeColor="textSecondary"
+        numberOfLines={2}
+        maxFontSizeMultiplier={1.2}
+      >
+        {meta}
+      </ThemedText>
+    </Card>
   );
 }
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  container: { padding: 20, gap: 18, paddingBottom: 32 },
-  head: { gap: 4, marginTop: 8 },
-  eyebrow: { fontSize: 13, lineHeight: 18, fontWeight: '900' },
-  greeting: { fontSize: 28, lineHeight: 34 },
-  hero: {
-    borderRadius: 24,
-    padding: 22,
-    minHeight: 132,
+  container: { padding: 20, gap: 16, paddingBottom: 32 },
+  head: { gap: 4, marginTop: 4 },
+  streakCard: { minHeight: 150, gap: 14, padding: 20 },
+  streakLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 8, position: 'relative', zIndex: 1 },
+  streakLoading: {
+    minHeight: 66,
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    position: 'relative',
+    zIndex: 1,
+  },
+  streakStats: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
     gap: 16,
+    position: 'relative',
+    zIndex: 1,
   },
-  heroLoading: { justifyContent: 'center' },
-  heroText: { flex: 1, gap: 6 },
-  heroKicker: { color: '#C8F7FF', fontSize: 12, lineHeight: 16, fontWeight: '900', letterSpacing: 1 },
-  heroTitle: { color: '#FFFFFF', fontSize: 26, lineHeight: 31, fontWeight: '900' },
-  heroSub: { color: '#E5F4FF', fontSize: 14, lineHeight: 20, fontWeight: '600' },
-  heroGo: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.18)',
+  streakNumber: { fontSize: 62, lineHeight: 66, fontVariant: ['tabular-nums'] },
+  duePill: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 6 },
+  sparringCard: {
+    gap: 18,
+    padding: 20,
+    borderRadius: 20,
+    borderWidth: 1,
+    overflow: 'hidden',
   },
-  row: { flexDirection: 'row', gap: 12 },
-  mini: {
-    flex: 1,
-    minHeight: 92,
-    borderRadius: 18,
-    borderWidth: StyleSheet.hairlineWidth,
-    padding: 16,
-    gap: 12,
-    justifyContent: 'center',
-  },
-  miniIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 13,
+  sparringTop: { flexDirection: 'row', alignItems: 'center', gap: 16 },
+  sparringCopy: { flex: 1, gap: 4 },
+  waveform: { height: 40, flexDirection: 'row', alignItems: 'center', gap: 3 },
+  waveBar: { width: 4, borderRadius: 999 },
+  tiles: { flexDirection: 'row', gap: 10 },
+  tile: { flex: 1, minHeight: 138, gap: 10, padding: 12 },
+  tileIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
