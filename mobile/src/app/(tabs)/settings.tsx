@@ -5,9 +5,16 @@ import { Redirect, router } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { authApi, ApiError, reviewApi, practiceApi, clipsApi } from '@shadow-ai/core';
 
+import { Card } from '@/components/card';
+import { Chip } from '@/components/chip';
+import {
+  createPressableRipple,
+  usePressableFeedback,
+} from '@/components/pressable-feedback';
+import { PrimaryButton } from '@/components/talk-button';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { pressableRipple, pressableStyle, useTheme } from '@/hooks/use-theme';
+import { useTheme } from '@/hooks/use-theme';
 import { useAuthStore } from '@/lib/auth-store';
 import { t } from '@/lib/i18n';
 
@@ -69,6 +76,12 @@ export default function SettingsScreen() {
         e instanceof ApiError ? e.message : t('settings.deleteError'),
       ),
   });
+  const deleteDisabled = !password || del.isPending;
+  const deleteFeedback = usePressableFeedback({
+    disabled: deleteDisabled,
+    focusRingColor: theme.textSecondary,
+    style: [styles.deleteBtn, { backgroundColor: theme.backgroundSelected }],
+  });
 
   if (!token) return <Redirect href="/login" />;
 
@@ -98,32 +111,45 @@ export default function SettingsScreen() {
           <ThemedText type="title">{t('nav.settings')}</ThemedText>
 
           {/* What I've built — a sense of advancement, from existing data. */}
-          <View style={styles.statsCard}>
+          <Card style={styles.sectionCard}>
             <ThemedText type="smallBold" style={styles.statsTitle}>{t('me.statsTitle')}</ThemedText>
             <View style={styles.statsGrid}>
               {stats.map((s) => (
                 <View key={s.label} style={styles.statTile}>
-                  <ThemedText style={styles.statNum}>{s.n}</ThemedText>
+                  <ThemedText style={[styles.statNum, { color: theme.primary }]}>{s.n}</ThemedText>
                   <ThemedText type="small" themeColor="textSecondary">{s.label}</ThemedText>
                 </View>
               ))}
             </View>
-          </View>
+          </Card>
 
           {me.data && (
-            <View style={styles.box}>
+            <Card style={styles.sectionCard}>
               <View style={styles.row}>
-                <View style={me.data.plan === 'pro' ? styles.proBadge : styles.freeBadge}>
-                  <ThemedText style={styles.badgeText}>
+                <View
+                  style={[
+                    styles.planBadge,
+                    {
+                      backgroundColor:
+                        me.data.plan === 'pro' ? theme.primary : theme.backgroundSelected,
+                    },
+                  ]}
+                >
+                  <ThemedText
+                    style={[
+                      styles.badgeText,
+                      { color: me.data.plan === 'pro' ? theme.onPrimary : theme.text },
+                    ]}
+                  >
                     {me.data.plan === 'pro' ? t('settings.planPro') : t('settings.planFree')}
                   </ThemedText>
                 </View>
                 <ThemedText type="small">{me.data.email}</ThemedText>
               </View>
-            </View>
+            </Card>
           )}
 
-          <View style={styles.box}>
+          <Card style={styles.sectionCard}>
             <ThemedText type="smallBold">{t('settings.displayName')}</ThemedText>
             <TextInput
               style={[
@@ -141,29 +167,24 @@ export default function SettingsScreen() {
               placeholderTextColor={theme.textSecondary}
               selectionColor={theme.primary}
             />
-            <Pressable
-              style={pressableStyle([
-                styles.saveBtn,
-                (!displayName.trim() ||
-                  profile.isPending ||
-                  displayName.trim() === me.data?.displayName) &&
-                  styles.disabled,
-              ])}
-              android_ripple={pressableRipple}
+            <PrimaryButton
+              accessibilityLabel={t('settings.save')}
+              accessibilityState={{ busy: profile.isPending }}
+              style={styles.saveBtn}
               disabled={
                 !displayName.trim() || profile.isPending || displayName.trim() === me.data?.displayName
               }
               onPress={() => profile.mutate()}
             >
               {profile.isPending ? (
-                <ActivityIndicator color="#fff" />
+                <ActivityIndicator color={theme.onPrimary} />
               ) : (
-                <ThemedText style={styles.saveText}>{t('settings.save')}</ThemedText>
+                t('settings.save')
               )}
-            </Pressable>
-          </View>
+            </PrimaryButton>
+          </Card>
 
-          <View style={styles.box}>
+          <Card style={styles.sectionCard}>
             <ThemedText type="smallBold">{t('settings.changePassword')}</ThemedText>
             <TextInput
               style={[
@@ -199,33 +220,33 @@ export default function SettingsScreen() {
               value={newPassword}
               onChangeText={setNewPassword}
             />
-            <Pressable
-              style={pressableStyle([
-                styles.saveBtn,
-                (!currentPassword || newPassword.length < 8 || changePw.isPending) && styles.disabled,
-              ])}
-              android_ripple={pressableRipple}
+            <PrimaryButton
+              accessibilityLabel={t('settings.changePassword')}
+              accessibilityState={{ busy: changePw.isPending }}
+              style={styles.saveBtn}
               disabled={!currentPassword || newPassword.length < 8 || changePw.isPending}
               onPress={() => changePw.mutate()}
             >
               {changePw.isPending ? (
-                <ActivityIndicator color="#fff" />
+                <ActivityIndicator color={theme.onPrimary} />
               ) : (
-                <ThemedText style={styles.saveText}>{t('settings.changePassword')}</ThemedText>
+                t('settings.changePassword')
               )}
-            </Pressable>
-          </View>
+            </PrimaryButton>
+          </Card>
 
-          <Pressable
-            style={pressableStyle(styles.signOut)}
-            android_ripple={pressableRipple}
+          <Card
+            style={[styles.sectionCard, styles.signOutCard]}
             onPress={() => signOut()}
+            accessibilityLabel={t('settings.signOut')}
           >
-            <ThemedText style={styles.signOutText}>{t('settings.signOut')}</ThemedText>
-          </Pressable>
+            <ThemedText style={styles.signOutText} themeColor="primary">
+              {t('settings.signOut')}
+            </ThemedText>
+          </Card>
 
-          <View style={styles.danger}>
-            <ThemedText type="smallBold" style={styles.dangerTitle}>
+          <Card style={[styles.sectionCard, styles.danger]}>
+            <ThemedText type="smallBold">
               {t('settings.deleteAccount')}
             </ThemedText>
             <ThemedText type="small">
@@ -249,37 +270,41 @@ export default function SettingsScreen() {
               onChangeText={setPassword}
             />
             <Pressable
-              style={pressableStyle([
-                styles.deleteBtn,
-                (!password || del.isPending) && styles.disabled,
-              ])}
-              android_ripple={pressableRipple}
-              disabled={!password || del.isPending}
+              accessibilityLabel={t('settings.deleteMyAccount')}
+              accessibilityRole="button"
+              accessibilityState={{ busy: del.isPending, disabled: deleteDisabled }}
+              android_ripple={createPressableRipple(theme.pressed)}
+              disabled={deleteDisabled}
+              onBlur={deleteFeedback.onBlur}
+              onFocus={deleteFeedback.onFocus}
               onPress={confirmDelete}
+              style={deleteFeedback.style}
             >
               {del.isPending ? (
-                <ActivityIndicator color="#fff" />
+                <ActivityIndicator color={theme.text} />
               ) : (
-                <ThemedText style={styles.deleteText}>{t('settings.deleteMyAccount')}</ThemedText>
+                <ThemedText style={styles.deleteText}>
+                  {t('settings.deleteMyAccount')}
+                </ThemedText>
               )}
             </Pressable>
-          </View>
+          </Card>
 
           <View style={styles.legal}>
-            <Pressable
-              style={pressableStyle(undefined)}
-              android_ripple={pressableRipple}
+            <Chip
+              tone="neutral"
+              style={styles.legalChip}
               onPress={() => Linking.openURL('https://mimi.daeseon.ai/en/terms')}
             >
-              <ThemedText style={styles.link}>{t('settings.terms')}</ThemedText>
-            </Pressable>
-            <Pressable
-              style={pressableStyle(undefined)}
-              android_ripple={pressableRipple}
+              {t('settings.terms')}
+            </Chip>
+            <Chip
+              tone="neutral"
+              style={styles.legalChip}
               onPress={() => Linking.openURL('https://mimi.daeseon.ai/en/privacy')}
             >
-              <ThemedText style={styles.link}>{t('settings.privacy')}</ThemedText>
-            </Pressable>
+              {t('settings.privacy')}
+            </Chip>
           </View>
         </ScrollView>
       </SafeAreaView>
@@ -290,40 +315,26 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   container: { padding: 24, gap: 16 },
-  statsCard: {
-    borderRadius: 16,
+  sectionCard: {
+    borderRadius: 18,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#9ca3af',
-    padding: 16,
+    padding: 18,
     gap: 12,
   },
   statsTitle: { opacity: 0.7 },
   statsGrid: { flexDirection: 'row', justifyContent: 'space-between' },
   statTile: { alignItems: 'center', gap: 2, flex: 1 },
-  statNum: { fontSize: 24, lineHeight: 28, fontWeight: '900', color: '#208AEF' },
-  box: {
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#9ca3af',
-    padding: 16,
-    gap: 8,
-  },
+  statNum: { fontSize: 24, lineHeight: 28, fontWeight: '900' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  proBadge: { backgroundColor: '#208AEF', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 3 },
-  freeBadge: { backgroundColor: '#9ca3af', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 3 },
-  badgeText: { color: '#fff', fontSize: 12, fontWeight: '700' },
-  signOut: { paddingVertical: 12 },
-  signOutText: { color: '#208AEF', fontWeight: '600', fontSize: 16 },
+  planBadge: { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 3 },
+  badgeText: { fontSize: 12, fontWeight: '700' },
+  signOutCard: { minHeight: 56, justifyContent: 'center' },
+  signOutText: { fontWeight: '700', fontSize: 16 },
   danger: {
-    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#dc262655',
-    backgroundColor: '#dc26260a',
-    padding: 16,
     gap: 10,
     marginTop: 8,
   },
-  dangerTitle: { color: '#dc2626' },
   input: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 10,
@@ -331,11 +342,18 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     fontSize: 16,
   },
-  deleteBtn: { backgroundColor: '#dc2626', borderRadius: 10, paddingVertical: 14, alignItems: 'center' },
-  disabled: { opacity: 0.5 },
-  deleteText: { color: '#fff', fontWeight: '700', fontSize: 16 },
-  saveBtn: { backgroundColor: '#208AEF', borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
-  saveText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  deleteBtn: {
+    alignItems: 'center',
+    alignSelf: 'stretch',
+    borderRadius: 14,
+    justifyContent: 'center',
+    minHeight: 52,
+    overflow: 'hidden',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+  },
+  deleteText: { fontSize: 16, fontWeight: '800' },
+  saveBtn: { marginTop: 2 },
   legal: { flexDirection: 'row', gap: 18, paddingTop: 8 },
-  link: { color: '#9ca3af', fontWeight: '600' },
+  legalChip: { minHeight: 44 },
 });

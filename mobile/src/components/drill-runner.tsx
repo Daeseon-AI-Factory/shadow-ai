@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ApiError, localToday, practiceApi } from '@shadow-ai/core';
 
+import { Card } from '@/components/card';
+import { Chip } from '@/components/chip';
+import { PrimaryButton } from '@/components/talk-button';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { pressableRipple, pressableStyle } from '@/hooks/use-theme';
+import { useTheme } from '@/hooks/use-theme';
 import { t } from '@/lib/i18n';
 
 const ALERT_REOPEN_DELAY_MS = 350;
@@ -122,13 +125,13 @@ export function DrillRunner({ items, onCheck }: { items: DrillItem[]; onCheck?: 
         <SafeAreaView style={[styles.flex, styles.center]}>
           <ThemedText type="subtitle">{t('drill.allCaughtUp')}</ThemedText>
           <ThemedText type="small">{t('drill.nothingDue')}</ThemedText>
-          <Pressable
-            style={pressableStyle(styles.linkBtn)}
-            android_ripple={pressableRipple}
+          <Chip
+            tone="primary"
+            style={styles.linkBtn}
             onPress={() => router.back()}
           >
-            <ThemedText style={styles.linkText}>{t('drill.back')}</ThemedText>
-          </Pressable>
+            {t('drill.back')}
+          </Chip>
         </SafeAreaView>
       </ThemedView>
     );
@@ -170,13 +173,12 @@ export function DrillRunner({ items, onCheck }: { items: DrillItem[]; onCheck?: 
           {streak !== null && (
             <ThemedText type="small">{t('drill.streak', { n: streak })}</ThemedText>
           )}
-          <Pressable
-            style={pressableStyle(styles.primaryBtn)}
-            android_ripple={pressableRipple}
+          <PrimaryButton
+            style={styles.primaryBtn}
             onPress={() => router.replace('/')}
           >
-            <ThemedText style={styles.primaryText}>{t('drill.home')}</ThemedText>
-          </Pressable>
+            {t('drill.home')}
+          </PrimaryButton>
         </SafeAreaView>
       </ThemedView>
     );
@@ -204,52 +206,55 @@ export function DrillRunner({ items, onCheck }: { items: DrillItem[]; onCheck?: 
                 {item.subtitle}
               </ThemedText>
             ) : null}
-            <ThemedText style={styles.frame}>{item.title}</ThemedText>
+            <ThemedText type="mono" themeColor="primary" style={styles.frame}>
+              {item.title}
+            </ThemedText>
           </View>
 
-          <View style={styles.cueBox}>
-            <ThemedText type="small">{t('drill.sayThis')}</ThemedText>
+          <Card style={styles.cueBox}>
+            <ThemedText type="label" themeColor="textSecondary">{t('drill.sayThis')}</ThemedText>
             <ThemedText style={styles.cue}>{item.cue}</ThemedText>
-          </View>
+          </Card>
 
           {!revealed ? (
             <View style={styles.gap}>
               {onCheck ? <InlineCheck key={item.key} item={item} onCheck={onCheck} /> : null}
-              <Pressable
-                style={pressableStyle(styles.primaryBtn)}
-                android_ripple={pressableRipple}
+              <PrimaryButton
+                style={styles.primaryBtn}
                 onPress={() => setRevealed(true)}
               >
-                <ThemedText style={styles.primaryText}>{t('drill.reveal')}</ThemedText>
-              </Pressable>
+                {t('drill.reveal')}
+              </PrimaryButton>
             </View>
           ) : (
             <View style={styles.gap}>
-              <View style={styles.modelBox}>
-                <ThemedText style={styles.model}>{item.model}</ThemedText>
+              <Card accent="primary" selected style={styles.modelBox}>
+                <ThemedText type="mono" style={styles.model}>{item.model}</ThemedText>
                 {item.note ? (
                   <ThemedText type="small" style={styles.gloss}>
                     {item.note}
                   </ThemedText>
                 ) : null}
-              </View>
+              </Card>
               <View style={styles.row}>
-                <Pressable
-                  style={pressableStyle([styles.gradeBtn, styles.again])}
-                  android_ripple={pressableRipple}
+                <Chip
+                  tone="live"
+                  style={styles.gradeBtn}
+                  textStyle={styles.gradeText}
                   disabled={grade.isPending || feedbackPending}
                   onPress={() => answer(false)}
                 >
-                  <ThemedText style={styles.againText}>{t('drill.again')}</ThemedText>
-                </Pressable>
-                <Pressable
-                  style={pressableStyle([styles.gradeBtn, styles.gotIt])}
-                  android_ripple={pressableRipple}
+                  {t('drill.again')}
+                </Chip>
+                <Chip
+                  tone="mint"
+                  style={styles.gradeBtn}
+                  textStyle={styles.gradeText}
                   disabled={grade.isPending || feedbackPending}
                   onPress={() => answer(true)}
                 >
-                  <ThemedText style={styles.primaryText}>{t('drill.gotIt')}</ThemedText>
-                </Pressable>
+                  {t('drill.gotIt')}
+                </Chip>
               </View>
             </View>
           )}
@@ -261,22 +266,33 @@ export function DrillRunner({ items, onCheck }: { items: DrillItem[]; onCheck?: 
 
 /** Optional in-drill AI check: type your produced version, get a verdict before revealing. */
 function InlineCheck({ item, onCheck }: { item: DrillItem; onCheck: DrillCheck }) {
+  const theme = useTheme();
   const [text, setText] = useState('');
   const check = useMutation({ mutationFn: () => onCheck(item, text.trim()) });
   const fb = check.data;
   return (
-    <View style={styles.checkBox}>
+    <Card style={styles.checkBox}>
       <TextInput
-        style={styles.checkInput}
+        style={[
+          styles.checkInput,
+          {
+            color: theme.text,
+            backgroundColor: theme.backgroundElement,
+            borderColor: theme.border,
+          },
+        ]}
         placeholder={t('drill.checkPlaceholder')}
-        placeholderTextColor="#9ca3af"
+        placeholderTextColor={theme.textSecondary}
+        selectionColor={theme.primary}
         multiline
         value={text}
         onChangeText={setText}
       />
-      {check.isError ? <ThemedText style={styles.checkError}>{t('drill.checkFailed')}</ThemedText> : null}
+      {check.isError ? (
+        <ThemedText themeColor="textSecondary">{t('drill.checkFailed')}</ThemedText>
+      ) : null}
       {fb ? (
-        <View style={[styles.checkVerdict, fb.ok ? styles.checkOk : styles.checkWork]}>
+        <Card accent={fb.ok ? 'mint' : 'amber'} selected style={styles.checkVerdict}>
           <ThemedText type="smallBold">
             {fb.ok ? t('drill.good') : t('drill.needsWork')}  ·  {fb.score}/100
           </ThemedText>
@@ -284,24 +300,22 @@ function InlineCheck({ item, onCheck }: { item: DrillItem; onCheck: DrillCheck }
           {fb.better ? (
             <ThemedText style={styles.checkBetter}>{t('drill.better', { text: fb.better })}</ThemedText>
           ) : null}
-        </View>
+        </Card>
       ) : null}
-      <Pressable
-        style={pressableStyle([
-          styles.checkBtn,
-          (!text.trim() || check.isPending) && styles.disabled,
-        ])}
-        android_ripple={pressableRipple}
+      <PrimaryButton
+        accessibilityLabel={t('drill.aiCheck')}
+        accessibilityState={{ busy: check.isPending }}
+        style={styles.checkBtn}
         disabled={!text.trim() || check.isPending}
         onPress={() => check.mutate()}
       >
         {check.isPending ? (
-          <ActivityIndicator color="#208AEF" />
+          <ActivityIndicator color={theme.onPrimary} />
         ) : (
-          <ThemedText style={styles.checkBtnText}>{t('drill.aiCheck')}</ThemedText>
+          t('drill.aiCheck')
         )}
-      </Pressable>
-    </View>
+      </PrimaryButton>
+    </Card>
   );
 }
 
@@ -313,65 +327,36 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', gap: 12 },
   subtitle: { textTransform: 'uppercase', letterSpacing: 1 },
   frameBox: { alignItems: 'center', gap: 6, marginTop: 8 },
-  frame: { fontSize: 18, color: '#208AEF', fontFamily: 'Menlo', textAlign: 'center' },
+  frame: { fontSize: 18, textAlign: 'center' },
   cueBox: {
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#9ca3af',
     padding: 16,
     alignItems: 'center',
     gap: 4,
   },
   cue: { fontSize: 22, textAlign: 'center' },
   modelBox: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#208AEF55',
-    backgroundColor: '#208AEF11',
     padding: 16,
     alignItems: 'center',
     gap: 4,
   },
-  model: { fontSize: 18, fontFamily: 'Menlo', textAlign: 'center' },
+  model: { fontSize: 18, textAlign: 'center' },
   gloss: { textAlign: 'center' },
   primaryBtn: {
-    backgroundColor: '#208AEF',
-    borderRadius: 10,
-    paddingVertical: 14,
-    alignItems: 'center',
     marginTop: 8,
   },
-  primaryText: { color: '#fff', fontWeight: '700', fontSize: 16 },
-  gradeBtn: { flex: 1, borderRadius: 10, paddingVertical: 14, alignItems: 'center' },
-  again: { borderWidth: 1, borderColor: '#9ca3af' },
-  againText: { fontWeight: '600' },
-  gotIt: { backgroundColor: '#208AEF' },
-  linkBtn: { paddingVertical: 10 },
-  linkText: { color: '#208AEF', fontWeight: '600' },
-  disabled: { opacity: 0.5 },
+  gradeBtn: { flex: 1, alignSelf: 'stretch', minHeight: 52, borderWidth: 2 },
+  gradeText: { fontSize: 14, fontWeight: '800' },
+  linkBtn: { alignSelf: 'center', minHeight: 44 },
   checkBox: { gap: 8 },
   checkInput: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#9ca3af',
     borderRadius: 10,
     padding: 12,
     fontSize: 15,
     minHeight: 64,
     textAlignVertical: 'top',
-    color: '#111827',
-    backgroundColor: '#fff',
   },
-  checkError: { color: '#dc2626' },
-  checkVerdict: { borderRadius: 10, borderWidth: 1, padding: 12, gap: 4 },
-  checkOk: { borderColor: '#10b98155', backgroundColor: '#10b98111' },
-  checkWork: { borderColor: '#f59e0b55', backgroundColor: '#f59e0b11' },
+  checkVerdict: { borderRadius: 12, padding: 12, gap: 4 },
   checkBetter: { fontStyle: 'italic' },
-  checkBtn: {
-    borderRadius: 10,
-    paddingVertical: 12,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#208AEF',
-  },
-  checkBtnText: { color: '#208AEF', fontWeight: '700' },
+  checkBtn: { marginTop: 2 },
 });

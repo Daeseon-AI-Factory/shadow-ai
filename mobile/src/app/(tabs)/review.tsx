@@ -1,27 +1,38 @@
 import { useCallback, useRef, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Redirect, router, useFocusEffect } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, reviewApi, analysisApi, REVIEW_QUALITY, type ReviewQueueItem } from '@shadow-ai/core';
+import Animated, {
+  cancelAnimation,
+  runOnJS,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 
+import { Card } from '@/components/card';
+import { Chip } from '@/components/chip';
 import { ChunkLadder } from '@/components/chunk-ladder';
 import { ErrorState } from '@/components/error-state';
 import { SkeletonCards } from '@/components/skeleton';
 import { haptic } from '@/lib/haptics';
+import { PrimaryButton } from '@/components/talk-button';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { pressableRipple, pressableStyle } from '@/hooks/use-theme';
 import { useAuthStore } from '@/lib/auth-store';
 import { t } from '@/lib/i18n';
 
 const GRADES = [
-  { label: 'Again', labelKey: 'review.again', quality: REVIEW_QUALITY.AGAIN, color: '#dc2626' },
-  { label: 'Hard', labelKey: 'review.hard', quality: REVIEW_QUALITY.HARD, color: '#f59e0b' },
-  { label: 'Good', labelKey: 'review.good', quality: REVIEW_QUALITY.GOOD, color: '#208AEF' },
-  { label: 'Easy', labelKey: 'review.easy', quality: REVIEW_QUALITY.EASY, color: '#10b981' },
-];
+  { labelKey: 'review.again', quality: REVIEW_QUALITY.AGAIN, tone: 'live' },
+  { labelKey: 'review.hard', quality: REVIEW_QUALITY.HARD, tone: 'amber' },
+  { labelKey: 'review.good', quality: REVIEW_QUALITY.GOOD, tone: 'primary' },
+  { labelKey: 'review.easy', quality: REVIEW_QUALITY.EASY, tone: 'mint' },
+] as const;
 const ALERT_REOPEN_DELAY_MS = 350;
+const CARD_FLIP_HALF_DURATION_MS = 140;
 type GradeAttempt = { itemId: string; quality: number; focusGeneration: number };
 
 export default function ReviewScreen() {
@@ -35,6 +46,59 @@ export default function ReviewScreen() {
   const focusGenerationRef = useRef(0);
   const feedbackPendingRef = useRef(false);
   const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flipFrameRef = useRef<ReturnType<typeof requestAnimationFrame> | null>(null);
+  const flipGenerationRef = useRef(0);
+  const flipInProgressRef = useRef(false);
+  const reduceMotion = useReducedMotion();
+  const flipRotation = useSharedValue(0);
+  const flipStyle = useAnimatedStyle(() => ({
+    transform: [{ perspective: 900 }, { rotateY: `${flipRotation.value}deg` }],
+  }));
+
+  const resetCard = () => {
+    flipGenerationRef.current += 1;
+    cancelAnimation(flipRotation);
+    if (flipFrameRef.current !== null) cancelAnimationFrame(flipFrameRef.current);
+    flipFrameRef.current = null;
+    flipInProgressRef.current = false;
+    flipRotation.value = 0;
+    setRevealed(false);
+  };
+
+  const completeFlip = (flipGeneration: number) => {
+    if (flipGeneration !== flipGenerationRef.current) return;
+    flipInProgressRef.current = false;
+  };
+
+  const finishReveal = (flipGeneration: number) => {
+    if (flipGeneration !== flipGenerationRef.current) return;
+    setRevealed(true);
+    flipFrameRef.current = requestAnimationFrame(() => {
+      if (flipGeneration !== flipGenerationRef.current) return;
+      flipFrameRef.current = null;
+      flipRotation.value = -90;
+      flipRotation.value = withTiming(0, { duration: CARD_FLIP_HALF_DURATION_MS }, (finished) => {
+        if (!finished) return;
+        runOnJS(completeFlip)(flipGeneration);
+      });
+    });
+  };
+
+  const revealAnswer = () => {
+    if (flipInProgressRef.current) return;
+    const flipGeneration = flipGenerationRef.current + 1;
+    flipGenerationRef.current = flipGeneration;
+    if (reduceMotion) {
+      flipRotation.value = 0;
+      setRevealed(true);
+      return;
+    }
+    flipInProgressRef.current = true;
+    flipRotation.value = withTiming(90, { duration: CARD_FLIP_HALF_DURATION_MS }, (finished) => {
+      if (!finished) return;
+      runOnJS(finishReveal)(flipGeneration);
+    });
+  };
 
   const queue = useQuery({
     queryKey: ['review', 'queue'],
@@ -51,11 +115,16 @@ export default function ReviewScreen() {
       feedbackPendingRef.current = false;
       setFeedbackPending(false);
       setPos(0);
-      setRevealed(false);
+      resetCard();
       queue.refetch();
       return () => {
         feedbackActiveRef.current = false;
         focusGenerationRef.current += 1;
+        flipGenerationRef.current += 1;
+        cancelAnimation(flipRotation);
+        if (flipFrameRef.current !== null) cancelAnimationFrame(flipFrameRef.current);
+        flipFrameRef.current = null;
+        flipInProgressRef.current = false;
         if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
         feedbackTimerRef.current = null;
         feedbackPendingRef.current = false;
@@ -127,7 +196,7 @@ export default function ReviewScreen() {
         return;
       }
       (pos >= (queue.data?.length ?? 0) - 1 ? haptic.success : haptic.tap)();
-      setRevealed(false);
+      resetCard();
       setPos((p) => p + 1);
     },
     onError: (error, variables) => {
@@ -181,24 +250,21 @@ export default function ReviewScreen() {
           <ThemedText type="small" themeColor="textSecondary" style={styles.doneTitle}>
             {finished ? t('review.reviewedCount', { n: total }) : t('review.nothingDueSub')}
           </ThemedText>
-          <Pressable
-            style={pressableStyle(styles.primaryBtn)}
-            android_ripple={pressableRipple}
+          <PrimaryButton
+            style={styles.primaryBtn}
             onPress={() => router.replace('/')}
-            accessibilityRole="button"
             accessibilityLabel={t('review.home')}
           >
-            <ThemedText style={styles.primaryText}>{t('review.home')}</ThemedText>
-          </Pressable>
-          <Pressable
-            style={pressableStyle(styles.doneSecondary)}
-            android_ripple={pressableRipple}
+            {t('review.home')}
+          </PrimaryButton>
+          <Chip
+            tone="primary"
+            style={styles.doneSecondary}
             onPress={() => router.replace('/practice')}
-            accessibilityRole="button"
             accessibilityLabel={t('review.morePractice')}
           >
-            <ThemedText style={styles.doneSecondaryText}>{t('review.morePractice')}</ThemedText>
-          </Pressable>
+            {t('review.morePractice')}
+          </Chip>
         </SafeAreaView>
       </ThemedView>
     );
@@ -216,12 +282,23 @@ export default function ReviewScreen() {
             {t('review.progress', { current: pos + 1, total })} · {clip.videoTitle}
           </ThemedText>
 
-          <View style={styles.promptBox}>
-            <ThemedText type="small">{t('review.recallInEnglish')}</ThemedText>
-            <ThemedText style={styles.prompt}>
-              {koPrompt ?? clip.name ?? t('review.recallThisClip')}
-            </ThemedText>
-          </View>
+          <Animated.View style={[styles.cardShell, flipStyle]}>
+            <Card style={styles.studyCard}>
+              {!revealed ? (
+                <ThemedText type="label" themeColor="textSecondary">
+                  {t('review.recallInEnglish')}
+                </ThemedText>
+              ) : null}
+              <ThemedText
+                accessibilityLiveRegion={revealed ? 'polite' : 'none'}
+                style={revealed ? styles.answer : styles.prompt}
+              >
+                {revealed
+                  ? clip.transcript ?? t('review.noTranscript')
+                  : koPrompt ?? clip.name ?? t('review.recallThisClip')}
+              </ThemedText>
+            </Card>
+          </Animated.View>
 
           {/* Active retrieval: rebuild the clip's English in English word order before revealing.
               Self-validating, so the grade you give yourself is honest. Mastery persists per-clip
@@ -231,38 +308,31 @@ export default function ReviewScreen() {
           ) : null}
 
           {!revealed ? (
-            <Pressable
-              style={pressableStyle(styles.primaryBtn)}
-              android_ripple={pressableRipple}
-              onPress={() => setRevealed(true)}
-              accessibilityRole="button"
+            <PrimaryButton
+              style={styles.primaryBtn}
+              onPress={revealAnswer}
               accessibilityLabel={t('review.reveal')}
             >
-              <ThemedText style={styles.primaryText}>{t('review.reveal')}</ThemedText>
-            </Pressable>
+              {t('review.reveal')}
+            </PrimaryButton>
           ) : (
             <View style={styles.gap}>
-              <View style={styles.answerBox}>
-                <ThemedText style={styles.answer}>
-                  {clip.transcript ?? t('review.noTranscript')}
-                </ThemedText>
-              </View>
-              <Pressable
-                style={pressableStyle(styles.linkBtn)}
-                android_ripple={pressableRipple}
+              <Chip
+                tone="primary"
+                style={styles.linkBtn}
                 onPress={() => router.push(`/player/${clip.id}`)}
-                accessibilityRole="button"
                 accessibilityLabel={t('review.openClip')}
               >
-                <ThemedText style={styles.linkText}>{t('review.openClip')}</ThemedText>
-              </Pressable>
+                {t('review.openClip')}
+              </Chip>
 
               <View style={styles.gradeRow}>
                 {GRADES.map((g) => (
-                  <Pressable
-                    key={g.label}
-                    style={pressableStyle([styles.gradeBtn, { backgroundColor: g.color }])}
-                    android_ripple={pressableRipple}
+                  <Chip
+                    key={g.labelKey}
+                    tone={g.tone}
+                    style={styles.gradeBtn}
+                    textStyle={styles.gradeText}
                     disabled={respond.isPending || feedbackPending}
                     onPress={() => {
                       submitGrade({
@@ -271,11 +341,10 @@ export default function ReviewScreen() {
                         focusGeneration: focusGenerationRef.current,
                       });
                     }}
-                    accessibilityRole="button"
                     accessibilityLabel={t(g.labelKey)}
                   >
-                    <ThemedText style={styles.gradeText}>{t(g.labelKey)}</ThemedText>
-                  </Pressable>
+                    {t(g.labelKey)}
+                  </Chip>
                 ))}
               </View>
             </View>
@@ -291,43 +360,33 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8, padding: 24 },
   container: { padding: 24, gap: 16 },
   gap: { gap: 12 },
-  promptBox: {
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#9ca3af',
-    padding: 18,
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 8,
-  },
-  prompt: { fontSize: 20, textAlign: 'center' },
-  answerBox: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#208AEF55',
-    backgroundColor: '#208AEF11',
-    padding: 16,
-  },
-  answer: { fontSize: 18, textAlign: 'center' },
-  gradeRow: { flexDirection: 'row', gap: 8 },
-  gradeBtn: { flex: 1, minHeight: 48, borderRadius: 10, paddingVertical: 14, alignItems: 'center', justifyContent: 'center' },
-  gradeText: { color: '#fff', fontWeight: '700' },
-  primaryBtn: {
-    backgroundColor: '#208AEF',
-    borderRadius: 10,
-    minWidth: 112,
-    minHeight: 48,
-    paddingVertical: 14,
-    paddingHorizontal: 20,
+  cardShell: { width: '100%' },
+  studyCard: {
+    minHeight: 168,
+    padding: 20,
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 8,
+    marginTop: 8,
+    backfaceVisibility: 'hidden',
+  },
+  prompt: { fontSize: 20, textAlign: 'center' },
+  answer: { fontSize: 18, textAlign: 'center' },
+  gradeRow: { flexDirection: 'row', gap: 8 },
+  gradeBtn: {
+    flex: 1,
+    alignSelf: 'stretch',
+    minHeight: 52,
+    paddingHorizontal: 8,
+    borderWidth: 2,
+  },
+  gradeText: { fontSize: 13, fontWeight: '800' },
+  primaryBtn: {
+    minWidth: 112,
     marginTop: 8,
   },
-  primaryText: { color: '#fff', fontWeight: '700', fontSize: 16 },
   doneEmoji: { fontSize: 56, marginBottom: 4 },
   doneTitle: { textAlign: 'center' },
-  doneSecondary: { minHeight: 44, paddingHorizontal: 18, alignItems: 'center', justifyContent: 'center' },
-  doneSecondaryText: { color: '#208AEF', fontWeight: '700', fontSize: 15 },
-  linkBtn: { minHeight: 44, paddingVertical: 8, alignItems: 'center', justifyContent: 'center' },
-  linkText: { color: '#208AEF', fontWeight: '600' },
+  doneSecondary: { alignSelf: 'center', minHeight: 44 },
+  linkBtn: { alignSelf: 'center', minHeight: 44 },
 });
