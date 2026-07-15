@@ -20,6 +20,7 @@ import {
   localToday,
   partitionLearning,
   shuffle,
+  authApi,
   practiceApi,
   ApiError,
   type SrsCard,
@@ -29,6 +30,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { ErrorState } from '@/components/error-state';
 import { SparringSessionSummary } from '@/components/session-summary';
+import { markFirstSparringComplete } from '@/lib/milestone-device-storage';
 import { useAuthStore } from '@/lib/auth-store';
 import { getApiBaseUrl } from '@/lib/api';
 import { t } from '@/lib/i18n';
@@ -144,6 +146,21 @@ export default function SparringScreen() {
   };
 
   const srs = useQuery({ queryKey: ['srs'], queryFn: () => practiceApi.srsStates(), enabled: !!token });
+  const me = useQuery({
+    queryKey: ['me'],
+    queryFn: () => authApi.me(),
+    enabled: !!token,
+    staleTime: 60_000,
+    retry: false,
+  });
+
+  // Seam (U3×U4): the first completed sparring records its milestone receipt; U4's MilestoneToast
+  // surfaces "milestone.firstSparring" on the next Practice visit. Idempotent — safe to re-run.
+  useEffect(() => {
+    if (phase === 'done' && me.data?.id) {
+      void markFirstSparringComplete(me.data.id);
+    }
+  }, [phase, me.data?.id]);
 
   // Due cards first (this session doubles as their review), then already-learned ones.
   // A brand-new account with no history still gets random seeds so the feature isn't dead.

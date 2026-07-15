@@ -1,0 +1,60 @@
+---
+title: "Integrated the four UX-motivation tracks (U1–U4) and closed the first-sparring seam"
+date: "2026-07-15"
+project: "shadow-ai"
+kind: "tech-retro"
+visibility: "public"
+language: "en"
+summary: "Merged three parallel Codex tracks (home mastery, session goal-gradient/peak-end, pack progress/milestones) on top of U1's data layer, resolving only two expected conflicts, then wired the one cross-track seam U4 deliberately left open. A pre-merge ground-truth check caught a branch ref that still carried a supposedly-reverted commit."
+tags: ["git", "merge", "react-native", "parallel-development"]
+---
+
+## Context
+
+Four disjoint Codex tracks off `integration/tracks`: U1 (mastery data layer, already merged),
+U2 (home mastery surface), U3 (session goal-gradient + peak-end), U4 (pack progress + milestones).
+U2/U3/U4 arrived as Draft PRs #11/#9/#10, each based on the same trunk commit `e77f24e`.
+
+## Merge
+
+Sequential `--no-ff` merges. The tracks were deliberately file-disjoint, so only two conflicts appeared:
+
+- **`docs/troubleshooting.md`** — all three append log entries → resolved with `git merge-file --union`.
+- **`mobile/src/lib/i18n-messages.ts`** — U2 (home keys) and U4 (milestone keys) both append; git
+  auto-merged them cleanly (different regions). Verified no duplicate keys survived: `tsc` runs in
+  strict mode, which errors on duplicate object-literal properties (TS1117), and `npx tsc --noEmit`
+  returned exit 0 on the fully merged tree.
+
+Everything else (index.tsx, mastery-summary.tsx, drill-runner.tsx, session-summary.tsx, sparring.tsx
+done-render, practice.tsx, milestone-*) landed without overlap.
+
+## The seam U4 left open
+
+U4 shipped `markFirstSparringComplete(userId)` in `milestone-device-storage.ts` but **did not call it** —
+the only natural call site is the sparring live→done boundary, which lives in U3's `sparring.tsx`,
+outside U4's file scope. So the "first sparring" milestone would never have fired.
+
+Closed it minimally in `sparring.tsx` (no render change on the crown-jewel screen):
+
+- added a `me` query for the user id,
+- a `useEffect` that calls `markFirstSparringComplete(me.data.id)` once `phase === 'done'`.
+
+It's **record-only**: `claimMilestone` (milestone-storage.ts:135) surfaces `first-sparring` purely from the
+stored `firstSparringCompleted` flag, so U4's existing `MilestoneToast` on Practice shows the celebration
+on the next visit. `recordFirstSparringCompletion` is idempotent, so re-runs on re-render are safe.
+`npx tsc --noEmit` exit 0 after wiring.
+
+## The bug the pre-merge check caught
+
+Before merging, a ground-truth check (`grep -c ShadowHero mobile/src/app/(tabs)/practice.tsx` → `2`;
+`git log origin/integration/tracks..integration/tracks` → 3 commits) revealed the **local branch ref still
+carried a commit a previous working-tree revert had reported as gone**. The earlier `git reset --mixed` had
+landed on a detached HEAD, not the `integration/tracks` branch ref, so the branch never actually moved.
+Nothing had been pushed (origin was clean at `e77f24e`), so a `git reset --hard origin/integration/tracks`
+fixed it before any merge.
+
+## Pattern
+
+After a revert, verify the **branch ref** (`git log origin/<branch>..<branch>`), not just the working tree.
+A clean `git status` and a passing grep on the working tree can both be true while the branch pointer still
+carries the commit you thought you dropped.

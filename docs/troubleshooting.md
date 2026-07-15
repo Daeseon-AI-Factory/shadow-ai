@@ -2248,3 +2248,30 @@ Assert that "128/502 mastered" is visible... COMPLETED
 동시 claim과 실기기 VoiceOver/TalkBack·reduced-motion 동작도 [unverified]다.
 
 **Commit.** `dd65821ddc45af58c8b5a88b71300dbc7c74839e`.
+
+---
+
+### Symptom — parallel Codex tracks U2/U3/U4 integration; a "reverted" commit survived on the branch ref
+
+```
+$ git log --oneline origin/integration/tracks..integration/tracks
+a23fdee chore(log): override false trigger ...
+7117271 docs(log): practice YouTube hero fix ...
+fcfbd50 fix(practice): restore YouTube shadowing as a first-class entry
+$ grep -c ShadowHero mobile/src/app/(tabs)/practice.tsx
+2
+```
+
+A prior working-tree revert reported success, but local `integration/tracks` still carried the 3 commits.
+
+**Cause (verified).** The earlier `git reset --mixed origin/integration/tracks` had run on a detached HEAD,
+not the branch ref, so the branch pointer never moved. `git status` was clean and the working tree looked
+reverted, masking it. Nothing was pushed (origin clean at e77f24e).
+
+**Fix.** `git reset --hard origin/integration/tracks` (tree was clean, safe) before merging. Then merged
+U2/U3/U4 `--no-ff`; only conflicts were docs/troubleshooting.md (union) and i18n-messages.ts (auto-merged,
+no dup — tsc strict TS1117 clean). Wired the U3×U4 seam `markFirstSparringComplete()` in sparring.tsx
+(me query + useEffect on phase==='done', record-only, no render change). `npx tsc --noEmit` exit 0.
+
+**Pattern.** After a revert, verify the BRANCH REF (`git log origin/<branch>..<branch>`), not just the
+working tree — a clean status can coexist with a branch pointer still carrying the "dropped" commit.

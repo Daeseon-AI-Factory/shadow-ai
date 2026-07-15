@@ -126,3 +126,7 @@ STAGE 0~9의 69개 태스크는 모두 완료. 자세한 내역은 git log 또�
 2. ANTHROPIC_API_KEY 설정 후 실제 분석 5건 수동 검수
 3. Vercel + Railway 배포 → 종단간 스모크
 4. 추가 코드 리뷰 LOW 항목: search LIKE escape, JWT tokenVersion claim, 큐레이션 seeder async
+
+## 모바일 UX 동기부여 통합 (2026-07-15)
+U1(mastery 데이터레이어)+U2(홈 mastery)+U3(세션 진행바·peak-end)+U4(팩 진행바·마일스톤) → integration/tracks 통합.
+충돌 2곳(troubleshooting union, i18n-messages 자동병합)만, tsc0. U3×U4 이음새(첫-스파링 마일스톤) 배선 완료.
