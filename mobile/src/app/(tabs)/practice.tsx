@@ -20,13 +20,18 @@ import {
   TRAP_CARDS,
   VERB_PACK,
   WORKSHOP_COUNTS,
+  authApi,
   cardIndex,
   localToday,
   practiceApi,
+  useMastery,
+  type MasteryCounts,
+  type PracticePackId,
 } from '@shadow-ai/core';
 
 import { Card } from '@/components/card';
 import { Chip } from '@/components/chip';
+import { MilestoneToast } from '@/components/milestone-toast';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useTheme } from '@/hooks/use-theme';
@@ -48,26 +53,47 @@ type Tool = {
   icon: SymbolName;
   count?: number;
   prefix?: PackPrefix;
+  packId?: PracticePackId;
 };
 
 /** Practice is deliberately even and quiet: every destination has the same footprint. */
 export default function PracticeMenuScreen() {
   const token = useAuthStore((s) => s.token);
   const [showWorkshop, setShowWorkshop] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
+  const [milestoneRefreshKey, setMilestoneRefreshKey] = useState(0);
+  const today = localToday();
+  const me = useQuery({
+    queryKey: ['me'],
+    queryFn: () => authApi.me(),
+    enabled: !!token,
+    staleTime: 60_000,
+    retry: false,
+  });
   const srs = useQuery({
     queryKey: ['srs'],
     queryFn: () => practiceApi.srsStates(),
     enabled: !!token,
     retry: false,
   });
+  const progress = useQuery({
+    queryKey: ['practice', 'progress', today],
+    queryFn: () => practiceApi.progress(today),
+    enabled: !!token,
+    retry: false,
+  });
   useFocusEffect(
     useCallback(() => {
-      if (!token) return;
-      void srs.refetch();
-    }, [token, srs.refetch]),
+      setIsFocused(true);
+      if (token) {
+        setMilestoneRefreshKey((value) => value + 1);
+        void Promise.all([srs.refetch(), progress.refetch()]);
+      }
+      return () => setIsFocused(false);
+    }, [progress.refetch, srs.refetch, token]),
   );
+  const mastery = useMastery(srs.data ?? []);
   const cardsByKey = useMemo(() => cardIndex(), []);
-  const today = localToday();
   const dueByPrefix = useMemo(() => {
     const counts = new Map<PackPrefix, number>();
     for (const state of srs.data ?? []) {
@@ -106,6 +132,7 @@ export default function PracticeMenuScreen() {
       icon: { ios: 'rectangle.stack.fill', android: 'view_carousel', web: 'view_carousel' },
       count: verbCount,
       prefix: 'pv:',
+      packId: 'verb',
     },
     {
       href: '/weak',
@@ -120,6 +147,7 @@ export default function PracticeMenuScreen() {
       icon: { ios: 'square.stack.3d.up.fill', android: 'dashboard', web: 'dashboard' },
       count: patternCount,
       prefix: 'pat:',
+      packId: 'pattern',
     },
     {
       href: '/gym',
@@ -134,6 +162,7 @@ export default function PracticeMenuScreen() {
       icon: { ios: 'text.bubble', android: 'chat', web: 'chat' },
       count: ENGLISH_PATTERNS.length,
       prefix: 'ep:',
+      packId: 'englishPattern',
     },
     {
       href: '/phrasal-500',
@@ -142,6 +171,7 @@ export default function PracticeMenuScreen() {
       icon: { ios: 'arrow.triangle.branch', android: 'merge_type', web: 'merge_type' },
       count: PHRASAL_500.length,
       prefix: 'p5:',
+      packId: 'phrasal500',
     },
     {
       href: '/it-patterns',
@@ -150,6 +180,7 @@ export default function PracticeMenuScreen() {
       icon: { ios: 'curlybraces', android: 'code', web: 'code' },
       count: IT_PATTERNS.length,
       prefix: 'itp:',
+      packId: 'itPattern',
     },
     {
       href: '/it-terms',
@@ -158,6 +189,7 @@ export default function PracticeMenuScreen() {
       icon: { ios: 'chevron.left.forwardslash.chevron.right', android: 'terminal', web: 'terminal' },
       count: IT_TERMS.length,
       prefix: 'itt:',
+      packId: 'itTerm',
     },
     {
       href: '/ai-coding',
@@ -166,6 +198,7 @@ export default function PracticeMenuScreen() {
       icon: { ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' },
       count: AI_CODING.length,
       prefix: 'aic:',
+      packId: 'aiCoding',
     },
     {
       href: '/collocations',
@@ -174,6 +207,7 @@ export default function PracticeMenuScreen() {
       icon: { ios: 'link', android: 'link', web: 'link' },
       count: collocationCount,
       prefix: 'col:',
+      packId: 'collocation',
     },
     {
       href: '/compose',
@@ -191,6 +225,13 @@ export default function PracticeMenuScreen() {
 
   return (
     <ThemedView style={styles.flex}>
+      <MilestoneToast
+        enabled={isFocused}
+        userId={me.data?.id}
+        mastered={srs.data ? mastery.mastered : undefined}
+        streak={progress.data?.streak}
+        refreshKey={milestoneRefreshKey}
+      />
       <SafeAreaView style={styles.flex} edges={['bottom']}>
         <ScrollView contentContainerStyle={styles.container}>
           <View style={styles.grid}>
@@ -205,6 +246,7 @@ export default function PracticeMenuScreen() {
                       : '—'
                     : undefined
                 }
+                mastery={tool.packId && srs.data ? mastery.byPack[tool.packId] : undefined}
               />
             ))}
           </View>
@@ -228,17 +270,35 @@ export default function PracticeMenuScreen() {
   );
 }
 
-function ToolCard({ tool, due }: { tool: Tool; due?: number | string }) {
+function ToolCard({
+  tool,
+  due,
+  mastery,
+}: {
+  tool: Tool;
+  due?: number | string;
+  mastery?: MasteryCounts;
+}) {
   const theme = useTheme();
   const meta = tool.count === undefined
     ? tool.sub
     : t('practice.packMeta', { count: tool.count, due: due ?? '—' });
+  const masteryMeta = mastery
+    ? t('practice.masteryMeta', { mastered: mastery.mastered, total: mastery.total })
+    : null;
+  const progress = mastery?.total ? Math.min(1, mastery.mastered / mastery.total) : 0;
 
   return (
     <Card
       style={styles.toolCard}
       onPress={() => router.push(tool.href)}
-      accessibilityLabel={`${tool.title}. ${meta}`}
+      accessibilityLabel={`${tool.title}. ${meta}${masteryMeta ? `. ${masteryMeta}` : ''}`}
+      accessibilityValue={mastery ? {
+        min: 0,
+        max: mastery.total,
+        now: mastery.mastered,
+        text: masteryMeta ?? undefined,
+      } : undefined}
     >
       <View style={[styles.iconShell, { backgroundColor: theme.primarySoft }]}>
         <SymbolView name={tool.icon} size={22} weight={SYMBOL_WEIGHT} tintColor={theme.primary} />
@@ -255,6 +315,23 @@ function ToolCard({ tool, due }: { tool: Tool; due?: number | string }) {
         >
           {meta}
         </ThemedText>
+        {mastery && masteryMeta ? (
+          <View style={styles.masteryBlock}>
+            <ThemedText type="label" themeColor="textSecondary" maxFontSizeMultiplier={1.2}>
+              {masteryMeta}
+            </ThemedText>
+            <View
+              style={[styles.progressTrack, { backgroundColor: theme.primarySoft }]}
+            >
+              <View
+                style={[
+                  styles.progressFill,
+                  { backgroundColor: theme.primary, width: `${progress * 100}%` },
+                ]}
+              />
+            </View>
+          </View>
+        ) : null}
       </View>
     </Card>
   );
@@ -362,7 +439,7 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   container: { padding: 16, gap: 18, paddingBottom: 32 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
-  toolCard: { flexBasis: '47%', minHeight: 142, gap: 14 },
+  toolCard: { flexBasis: '47%', minHeight: 166, gap: 14 },
   iconShell: {
     width: 42,
     height: 42,
@@ -370,7 +447,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  toolCopy: { flex: 1, justifyContent: 'space-between', gap: 8 },
+  toolCopy: { flex: 1, justifyContent: 'space-between', gap: 7 },
+  masteryBlock: { gap: 5 },
+  progressTrack: { height: 4, borderRadius: 2, overflow: 'hidden' },
+  progressFill: { height: '100%', borderRadius: 2 },
   workshopToggle: { alignSelf: 'stretch' },
   workshopToggleText: { flexShrink: 1, textAlign: 'center' },
   workshop: { gap: 12 },
