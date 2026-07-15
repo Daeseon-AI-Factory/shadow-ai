@@ -2083,3 +2083,41 @@ Tests  40 passed (40)
 **Commit.** `f2055fa8b28270fb74f41b22936cc43638b16fac`
 
 <!-- override-trigger: 76ae949 Merge branch 'codex/ux-u1' into integration/tracks — 통합 커밋. 422 LOC는 U1(useMastery·sparringReport 래퍼·vitest12)의 자체 커밋 f2055fa/5658a17이 이미 로깅한 변경분이며, U1의 mdx(2026-07-14-u1-mastery-data-layer.mdx)와 troubleshooting 항목이 이 머지로 함께 들어옴. 중복 로깅 불필요. -->
+
+---
+
+## 2026-07-14 — 팩 mastery가 Practice 카드에 없고 축하 receipt 경계가 없음
+
+**Symptom.** U1의 `useMastery().byPack`은 8개 정적 팩 집계를 제공했지만 Practice 팩 카드는
+전체 수와 due만 표시했다. 마스터 100, 스트릭 7·30·100, 첫 스파링 완료를 한 번만 축하하는
+로컬 receipt나 토스트 컴포넌트도 없었다.
+
+**Cause (verified).** 구현 전 `practice.tsx`는 `practiceApi.srsStates()`로 due를 세는 경로만
+사용했고 `useMastery`를 import하지 않았다. 저장소 검색에서도 U4 마일스톤 ID와 receipt helper는
+존재하지 않았다.
+
+**Fix.** 구현 커밋 `dd65821ddc45af58c8b5a88b71300dbc7c74839e`에서 8개 카드에
+`PracticePackId`를 연결해 `mastered/total` 메타와 4px 진행바를 추가했다. 사용자별
+SecureStore(웹은 localStorage) 상태에는 이전 수치, 축하 완료, pending queue를 저장한다. Toast는
+focus된 Practice에서만 claim하고 실제 `onLayout` 뒤 receipt를 acknowledge한다. 레이아웃 전 blur는
+lease를 반환하고, 레이아웃 뒤 저장 중 blur는 직렬화된 acknowledge를 기다린다. reduced-motion이면
+scale·fade timing을 생략하고 iOS에서는 접근성 announcement를 보낸다.
+
+**Verification.** 최종 커밋 상태에서 `npx tsc --noEmit --pretty false --incremental false`와
+`git diff --cached --check`는 stdout 없이 exit 0이었다. 저장값을 99/6으로 만든 뒤 100/7을 넣은
+in-memory 시뮬레이션은 다음을 출력했다.
+
+```text
+{"manipulated":"99-to-100","concurrentClaims":1,"queued":["mastery-100","streak-7"],"repeat":null,"firstSparring":"one-time"}
+```
+
+별도 iOS Simulator의 다크 화면에서는 `100 expressions mastered`와 `0/1956 mastered`, 라이트·
+다크 재진입 흐름에서는 `128/502 mastered`를 확인했다. 같은 receipt로 Today→Practice를 다시
+열었을 때 자동화 출력은 `Assert that "100 expressions mastered" is not visible... COMPLETED`였다.
+이 캡처 뒤 최종 커밋에는 receipt 시점을 렌더 전에서 `onLayout` 뒤로 옮기고 접근성 속성을 추가했다.
+스타일 선언은 바뀌지 않았지만 이 최종 해시를 새 네이티브 번들로 재캡처하지는 않았다.
+
+실제 스파링 `done` 경로의 helper 호출은 금지된 U3 파일 범위라 [unverified]이며, 웹 다중 탭의
+동시 claim과 실기기 VoiceOver/TalkBack·reduced-motion 동작도 [unverified]다.
+
+**Commit.** `dd65821ddc45af58c8b5a88b71300dbc7c74839e`.
