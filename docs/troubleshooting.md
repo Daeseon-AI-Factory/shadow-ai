@@ -2275,3 +2275,22 @@ no dup — tsc strict TS1117 clean). Wired the U3×U4 seam `markFirstSparringCom
 
 **Pattern.** After a revert, verify the BRANCH REF (`git log origin/<branch>..<branch>`), not just the
 working tree — a clean status can coexist with a branch pointer still carrying the "dropped" commit.
+
+---
+
+### Symptom — card labels cut off with an ellipsis (Practice pack cards, Home tiles)
+
+User on build 21: "카드들 글자도 잘려있다". Titles/subtitles truncated mid-word.
+
+**Cause (verified).** `ToolCard` (practice.tsx:307,313) and `HomeTile` (index.tsx:377,383) capped text
+at `numberOfLines={2}`. Worsened after U4 added a mastery block (익힘 N/M + progress bar) to pack cards,
+squeezing the remaining vertical space so 2 lines no longer held the label (esp. at larger Dynamic Type).
+
+**Fix.** Removed the `numberOfLines={2}` caps on both card grids. Cards use `minHeight` (grow with content)
+and their row containers default to `alignItems: 'stretch'`, so siblings in a row match the tallest — text
+now fully wraps, nothing is clipped, rows stay even. `npx tsc --noEmit` exit 0.
+
+**Commit.** `0b719df`
+
+**Pattern.** A fixed `numberOfLines` on variable-length labels inside a min-height card truncates as soon as
+content grows (extra rows, bigger fonts). For adaptive cards, drop the line cap and let the card grow.
