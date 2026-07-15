@@ -2083,3 +2083,76 @@ Tests  40 passed (40)
 **Commit.** `f2055fa8b28270fb74f41b22936cc43638b16fac`
 
 <!-- override-trigger: 76ae949 Merge branch 'codex/ux-u1' into integration/tracks — 통합 커밋. 422 LOC는 U1(useMastery·sparringReport 래퍼·vitest12)의 자체 커밋 f2055fa/5658a17이 이미 로깅한 변경분이며, U1의 mdx(2026-07-14-u1-mastery-data-layer.mdx)와 troubleshooting 항목이 이 머지로 함께 들어옴. 중복 로깅 불필요. -->
+---
+
+## 2026-07-15 — Home에 실제 Practice 진척과 절제된 스트릭 위험 신호가 없었음
+
+**Symptom.** U2 전 `integration/tracks` Home에는 U1 mastery selector나 Practice progress를
+읽는 경로가 없었다.
+
+```text
+$ git show integration/tracks:'mobile/src/app/(tabs)/index.tsx' | rg -n 'Mastery|practiceProgress|useMastery'
+[exit 1; stdout empty]
+```
+
+**Cause (verified).** 기존 Home은 `reviewApi.streak()`의 클립 복습 스트릭만 조회했다.
+`PracticeProgress.reps`는 오늘 횟수이며 실제 7일 이력이 없고,
+`selectPracticeRhythm()`도 이를 `repsToday`로 명시한다. 따라서 주간 횟수는 현재 API로 만들 수
+없었다. U1의 mastery 정의는 정적 카드 중 현재 `box >= 4`인 수이며, 평생 누적 달성 수가 아니다.
+
+**Fix.** 구현 커밋 `65f3bf083a84dc0fbda20f14375aaaef4fe1f8c2`에서
+`mobile/src/app/(tabs)/index.tsx`가 `practiceApi.srsStates()`와 날짜별
+`practiceApi.progress()`를 읽고 `useMastery()`/`selectPracticeRhythm()`으로 Home 요약을 만든다.
+신규 `mobile/src/components/mastery-summary.tsx`는 R3 ink 카드 바로 아래에 theme-token 기반
+progress bar와 `오늘 reps · Practice streak · 익힘/전체`를 표시한다. 숫자는 tabular-nums다.
+
+위험 넛지는 로컬 18시(명세에 정확한 시간이 없어 **APPROX** 경계), `repsToday === 0`,
+`streak > 0`, 당일 progress refetch 성공을 모두 만족할 때만 한 줄로 노출한다. 계정별 최근 노출
+로컬 날짜를 SecureStore에 먼저 기록해 같은 기기에서는 하루 한 번만 보이며, 저장 실패 시 반복
+노출 대신 숨긴다. focus, AppState active, 시간/날짜 경계에서 서버 progress를 다시 확인한다.
+
+**Verification.** 최종 정적 검사는 다음 출력이었다.
+
+```text
+$ cd mobile && npx tsc --noEmit --pretty false
+[exit 0; stdout empty]
+
+$ cd frontend && npm test -- --run tests/practice-mastery.test.ts
+Test Files  1 passed (1)
+Tests  7 passed (7)
+
+$ git diff --check
+[exit 0; stdout empty]
+```
+
+iPhone 17 Pro Max iOS 26.5 Simulator의 dark Home에서 채점 전 실제 값과 저녁 넛지를 확인했다.
+
+```text
+Assert that "Today 0 reps · 🔥 1-day streak" is visible... COMPLETED
+Assert that "Today 0 reps. 1-day streak. 0 of 4233 learned." is visible... COMPLETED
+Assert that "🔥 1-day streak — nothing yet today" is visible... COMPLETED
+```
+
+같은 로컬 날짜 재실행에서는 넛지가 다시 나오지 않았고, Pattern drill의 due box-3 카드를
+`Got it`으로 채점한 뒤 Home 값이 증가했다.
+
+```text
+Assert that "🔥 1-day streak — nothing yet today" is not visible... COMPLETED
+Tap on "Got it"... COMPLETED
+Assert that "Today 1 reps · 🔥 1-day streak" is visible... COMPLETED
+Assert that "Today 1 reps. 1-day streak. 1 of 4233 learned." is visible... COMPLETED
+```
+
+채점 후 DB는 대상 카드 `box=4`, `correct_count=4`, `reps_today=1`, `total_reps=5`였다. 같은
+Home 상태를 light와 dark에서 캡처해 progress 카드가 ink 카드 아래, Sparring 위에 있고 두
+테마 모두 읽을 수 있음을 시각 확인했다.
+
+**Known gaps.** 같은 시각의 다른 기기에서 연습했는지를 push 방식으로 즉시 알 수는 없다;
+Home focus/foreground refetch 뒤에는 서버 값을 따른다. R3 ink 카드의 숫자는 clip-review streak,
+U2 요약은 PracticeProgress streak라 두 값은 서로 다른 도메인이며 실제 캡처에서도 달랐다.
+Android 실기기와 screen reader는 [unverified]다.
+
+**Commit.** `65f3bf083a84dc0fbda20f14375aaaef4fe1f8c2`
+
+**Pattern.** 날짜·시간 조건 UI는 최초 render만 보지 말고 화면 focus, foreground 복귀,
+시간/자정 경계에서 서버의 당일 상태를 다시 읽어야 한다.
