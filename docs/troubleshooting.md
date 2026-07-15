@@ -2294,3 +2294,4 @@ now fully wraps, nothing is clipped, rows stay even. `npx tsc --noEmit` exit 0.
 
 **Pattern.** A fixed `numberOfLines` on variable-length labels inside a min-height card truncates as soon as
 content grows (extra rows, bigger fonts). For adaptive cards, drop the line cap and let the card grow.
+<!-- skipped: 94f7a1b docs(log): card text truncation fix (0b719df) [no-log] -->
