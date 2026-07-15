@@ -1,0 +1,91 @@
+---
+title: "Home now shows honest practice mastery without inventing weekly activity"
+date: "2026-07-15"
+project: "shadow-ai"
+kind: "ux-retro"
+visibility: "public"
+language: "en"
+summary: "U2 adds a compact, theme-aware Home mastery bar backed by real SRS and daily PracticeProgress data, plus a once-per-day evening streak-risk line that disappears after practice."
+tags: ["ux", "mastery", "streak", "expo", "react-native"]
+---
+
+## The data boundary
+
+The motivation spec asked Home to make progress visible. The original wording included a weekly
+practice count, but the current API does not contain seven days of history:
+`PracticeProgress.reps` is today's count. U1's `selectPracticeRhythm()` deliberately exposes it as
+`repsToday` for that reason.
+
+U2 therefore does not fabricate a weekly number. The compact Home surface shows only data the app
+can currently prove:
+
+- today's Practice reps;
+- the PracticeProgress streak;
+- current mastery over all static packs, where U1 defines mastered as `box >= 4`.
+
+That last number is current mastery, not a lifetime achievement counter. In the verified build the
+static total was 4,233 cards.
+
+## The Home surface
+
+Commit `65f3bf083a84dc0fbda20f14375aaaef4fe1f8c2` adds
+`mobile/src/components/mastery-summary.tsx` and wires it into
+`mobile/src/app/(tabs)/index.tsx` directly beneath the existing R3 ink streak card and above
+Sparring. It reuses `Card`, `Skeleton`, `ThemedText`, and `useTheme()` tokens; the new surface adds no
+raw color. Every displayed progress number uses tabular numerals.
+
+The Home screen fetches `/api/practice/srs` and the local date's `/api/practice/progress`, then uses
+U1's `useMastery()` and `selectPracticeRhythm()`. Supplemental failures stay inside the progress
+card instead of replacing the entire Home screen. Returning from a drill refetches both sources so
+a grade can change the summary immediately.
+
+## A restrained streak nudge
+
+The risk line is eligible only after local 18:00 (**APPROX**: the product spec says “evening” but
+does not define an exact hour), with `repsToday === 0`, a positive Practice streak, and a successful
+fresh progress response for the same local date. The copy is one line:
+
+> 🔥 1-day streak — nothing yet today
+
+Before rendering, the component records the account's local shown-date in SecureStore. A later
+visit on the same device and date suppresses the line. If storage fails, it fails closed and hides
+the prompt. The decision is re-evaluated on Home focus, app foreground, hourly changes, and date
+rollover. Once today's reps are positive, the line is ineligible regardless of its stored state.
+
+This is deliberately not a notification system and does not introduce guilt copy, repeated
+prompts, XP, or rewards.
+
+## Verification
+
+TypeScript and the U1 selector suite passed:
+
+```text
+$ cd mobile && npx tsc --noEmit --pretty false
+[exit 0; stdout empty]
+
+$ cd frontend && npm test -- --run tests/practice-mastery.test.ts
+Test Files  1 passed (1)
+Tests  7 passed (7)
+```
+
+On an iPhone 17 Pro Max iOS 26.5 Simulator, a real local fixture started at zero mastered and zero
+reps with a one-day Practice streak. Maestro saw the evening line, then confirmed it did not repeat
+on the next launch. A due box-3 Pattern drill card was revealed and graded `Got it`; the final Home
+assertions were:
+
+```text
+Assert that "Today 1 reps · 🔥 1-day streak" is visible... COMPLETED
+Assert that "Today 1 reps. 1-day streak. 1 of 4233 learned." is visible... COMPLETED
+Assert that "🔥 1-day streak — nothing yet today" is not visible... COMPLETED
+```
+
+The database then showed the card in box 4 with four correct recalls and PracticeProgress at one
+rep for the local date. Both light and dark Home captures were inspected; the mastery surface was
+readable and remained in the first viewport.
+
+## Remaining boundary
+
+SecureStore makes the frequency cap per account, device, and local date. Another device's grade is
+observed after Home refetches; cross-device push synchronization is not part of U2. Also, the R3 ink
+card uses the clip-review streak while this summary uses the drill PracticeProgress streak. They are
+separate existing domains and can display different values; U2 did not redefine either source.
