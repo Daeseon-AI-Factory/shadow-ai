@@ -1,14 +1,28 @@
-import { useCallback } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, AppState, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Redirect, router, useFocusEffect } from 'expo-router';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import boldSymbolWeight from 'expo-symbols/androidWeights/bold';
 import { useQuery } from '@tanstack/react-query';
-import { authApi, clipsApi, reviewApi } from '@shadow-ai/core';
+import {
+  authApi,
+  clipsApi,
+  localToday,
+  practiceApi,
+  reviewApi,
+  selectPracticeRhythm,
+  useMastery,
+} from '@shadow-ai/core';
 
 import { Card } from '@/components/card';
 import { ErrorState } from '@/components/error-state';
+import {
+  isStreakAtRisk,
+  MasterySummary,
+  MasterySummarySkeleton,
+  MasterySummaryUnavailable,
+} from '@/components/mastery-summary';
 import { TalkButton } from '@/components/talk-button';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -22,15 +36,49 @@ type SymbolName = SymbolViewProps['name'];
 const SCREENSHOT_DISPLAY_NAME = process.env.EXPO_PUBLIC_SCREENSHOT_DISPLAY_NAME;
 const WAVEFORM_HEIGHTS = [12, 26, 18, 34, 22, 30, 14] as const;
 const SYMBOL_WEIGHT = { ios: 'bold', android: boldSymbolWeight } as const;
+const LOCAL_CLOCK_REFRESH_MS = 60_000;
 
 /**
  * Today keeps the existing resilient query flow, but gives the first viewport a stable hierarchy:
- * streak, one-tap Sparring, then the three quiet destinations used every day.
+ * streak, mastery, one-tap Sparring, then the three quiet destinations used every day.
  */
 export default function TodayScreen() {
   const token = useAuthStore((s) => s.token);
   const hydrated = useAuthStore((s) => s.hydrated);
   const theme = useTheme();
+  const [now, setNow] = useState(() => new Date());
+  const [refreshRevision, setRefreshRevision] = useState(0);
+  const clockBoundary = useRef(`${localToday()}-${now.getHours()}`);
+  const today = localToday();
+  const [nudgeRefreshReady, setNudgeRefreshReady] = useState(false);
+
+  useEffect(() => {
+    const refreshClock = () => {
+      const next = new Date();
+      const nextBoundary = `${localToday()}-${next.getHours()}`;
+      setNow(next);
+
+      if (nextBoundary !== clockBoundary.current) {
+        clockBoundary.current = nextBoundary;
+        setNudgeRefreshReady(false);
+        setRefreshRevision((revision) => revision + 1);
+      }
+    };
+
+    const interval = setInterval(refreshClock, LOCAL_CLOCK_REFRESH_MS);
+    const subscription = AppState.addEventListener('change', (state) => {
+      setNudgeRefreshReady(false);
+      if (state === 'active') {
+        refreshClock();
+        setRefreshRevision((revision) => revision + 1);
+      }
+    });
+
+    return () => {
+      clearInterval(interval);
+      subscription.remove();
+    };
+  }, []);
 
   const me = useQuery({
     queryKey: ['me'],
@@ -47,6 +95,18 @@ export default function TodayScreen() {
     enabled: !!token,
     retry: false,
   });
+  const srs = useQuery({
+    queryKey: ['srs'],
+    queryFn: () => practiceApi.srsStates(),
+    enabled: !!token,
+    retry: false,
+  });
+  const practiceProgress = useQuery({
+    queryKey: ['practice', 'progress', today],
+    queryFn: () => practiceApi.progress(today),
+    enabled: !!token,
+    retry: false,
+  });
   // size:1 with the default "newest" sort keeps the existing recent-clip state user-scoped.
   const recent = useQuery({
     queryKey: ['clips', 'recent'],
@@ -54,13 +114,49 @@ export default function TodayScreen() {
     enabled: !!token,
     retry: false,
   });
+  const mastery = useMastery(srs.data ?? []);
+  const rhythm = practiceProgress.data
+    ? selectPracticeRhythm(practiceProgress.data)
+    : null;
+  const retryMasterySummary = useCallback(() => {
+    setNudgeRefreshReady(false);
+    const progressRefresh = practiceProgress.refetch();
+    void Promise.all([srs.refetch(), progressRefresh]);
+    void progressRefresh.then((result) => {
+      setNudgeRefreshReady(result.status === 'success');
+    });
+  }, [srs.refetch, practiceProgress.refetch]);
+
   // Expo Router keeps Home mounted. Refresh the decision inputs whenever the learner returns from
   // clipping or reviewing so the counts reflect the work they just completed.
   useFocusEffect(
     useCallback(() => {
-      if (!token) return;
-      void Promise.all([streak.refetch(), recent.refetch()]);
-    }, [token, streak.refetch, recent.refetch]),
+      if (!token) {
+        setNudgeRefreshReady(false);
+        return;
+      }
+
+      let active = true;
+      setNudgeRefreshReady(false);
+      const progressRefresh = practiceProgress.refetch();
+      void Promise.all([streak.refetch(), recent.refetch(), srs.refetch(), progressRefresh]);
+      void progressRefresh.then((result) => {
+        if (active) setNudgeRefreshReady(result.status === 'success');
+      });
+
+      return () => {
+        active = false;
+        setNudgeRefreshReady(false);
+      };
+    }, [
+      token,
+      today,
+      refreshRevision,
+      streak.refetch,
+      recent.refetch,
+      srs.refetch,
+      practiceProgress.refetch,
+    ]),
   );
 
   if (!hydrated) {
@@ -74,15 +170,19 @@ export default function TodayScreen() {
 
   const due = streak.data?.dueToday ?? 0;
 
-  // Greeting and streak are load-bearing. A supplemental clip-count outage should not hide the
-  // stable Home destinations; the My clips tile renders an explicit unavailable marker instead.
+  // Greeting and the existing ink streak remain load-bearing. Supplemental progress and clip
+  // outages stay inside their own surfaces so the stable Home destinations remain usable.
   if ((me.isError && !me.data) || (streak.isError && !streak.data)) {
     return (
       <ThemedView style={styles.flex}>
         <SafeAreaView style={styles.flex} edges={['top']}>
           <ErrorState
             onRetry={() => {
-              void Promise.all([me.refetch(), streak.refetch(), recent.refetch()]);
+              void Promise.all([
+                me.refetch(),
+                streak.refetch(),
+                recent.refetch(),
+              ]);
             }}
           />
         </SafeAreaView>
@@ -154,6 +254,30 @@ export default function TodayScreen() {
               </View>
             )}
           </Card>
+
+          {(srs.isError && !srs.data) || (practiceProgress.isError && !practiceProgress.data) ? (
+            <MasterySummaryUnavailable onRetry={retryMasterySummary} />
+          ) : srs.data && rhythm ? (
+            <MasterySummary
+              mastered={mastery.mastered}
+              total={mastery.total}
+              repsToday={rhythm.repsToday}
+              streak={rhythm.streak}
+              localDate={today}
+              userId={me.data?.id}
+              nudgeEligible={
+                nudgeRefreshReady &&
+                practiceProgress.data?.date === today &&
+                isStreakAtRisk({
+                  localHour: now.getHours(),
+                  repsToday: rhythm.repsToday,
+                  streak: rhythm.streak,
+                })
+              }
+            />
+          ) : (
+            <MasterySummarySkeleton />
+          )}
 
           <View
             style={[
