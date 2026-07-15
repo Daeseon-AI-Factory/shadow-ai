@@ -304,13 +304,12 @@ function ToolCard({
         <SymbolView name={tool.icon} size={22} weight={SYMBOL_WEIGHT} tintColor={theme.primary} />
       </View>
       <View style={styles.toolCopy}>
-        <ThemedText type="smallBold" numberOfLines={2} maxFontSizeMultiplier={1.3}>
+        <ThemedText type="smallBold" maxFontSizeMultiplier={1.3}>
           {tool.title}
         </ThemedText>
         <ThemedText
           type="label"
           themeColor="textSecondary"
-          numberOfLines={2}
           maxFontSizeMultiplier={1.2}
         >
           {meta}

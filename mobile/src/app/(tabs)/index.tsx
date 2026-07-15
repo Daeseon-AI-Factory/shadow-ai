@@ -374,13 +374,12 @@ function HomeTile({
       <View style={[styles.tileIcon, { backgroundColor: theme.primarySoft }]}>
         <SymbolView name={icon} size={20} weight={SYMBOL_WEIGHT} tintColor={theme.primary} />
       </View>
-      <ThemedText type="smallBold" numberOfLines={2} maxFontSizeMultiplier={1.25}>
+      <ThemedText type="smallBold" maxFontSizeMultiplier={1.25}>
         {title}
       </ThemedText>
       <ThemedText
         type="label"
         themeColor="textSecondary"
-        numberOfLines={2}
         maxFontSizeMultiplier={1.2}
       >
         {meta}
