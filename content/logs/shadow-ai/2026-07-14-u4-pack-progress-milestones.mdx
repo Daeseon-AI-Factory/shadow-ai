@@ -43,8 +43,12 @@ queue를 저장한다. 동일 JS runtime의 storage 작업과 presentation lease
 ```
 
 iOS Simulator에서 다크 토스트, 라이트·다크 팩 카드, `128/502 mastered`, 재진입 시 동일 토스트
-미노출을 확인했다. 마지막 UI 캡처 뒤 receipt 시점과 접근성만 수정했으며 최종 해시의 새 네이티브
-캡처는 [unverified]다. 실제 스파링 완료 caller는 U3 금지 파일 범위라 [unverified]이며, 웹 다중
-탭 원자성, 실기기 VoiceOver/TalkBack, reduced-motion 런타임도 [unverified]다.
+미노출을 확인했다. 최종 head의 2.2초 설정에서는 claim·render·layout·acknowledge 뒤 다음 claim이
+null인 순서를 로그로 확인했다. Maestro settle이 2.2초보다 길어 blur 자동화에서만 표시 시간을
+임시 20초로 늘렸고, 토스트 visible → Today → Practice → not visible 및 `128/502 mastered`가 모두
+`COMPLETED`였다. 임시 시간과 진단 로그를 제거한 뒤 TypeScript와 clean worktree를 다시 확인했다.
+
+실제 스파링 완료 caller는 U3 금지 파일 범위라 [unverified]이며, 웹 다중 탭 원자성, 실기기
+VoiceOver/TalkBack, reduced-motion 런타임도 [unverified]다.
 
 구현 커밋: `dd65821ddc45af58c8b5a88b71300dbc7c74839e`.

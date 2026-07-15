@@ -2115,7 +2115,18 @@ in-memory 시뮬레이션은 다음을 출력했다.
 다크 재진입 흐름에서는 `128/502 mastered`를 확인했다. 같은 receipt로 Today→Practice를 다시
 열었을 때 자동화 출력은 `Assert that "100 expressions mastered" is not visible... COMPLETED`였다.
 이 캡처 뒤 최종 커밋에는 receipt 시점을 렌더 전에서 `onLayout` 뒤로 옮기고 접근성 속성을 추가했다.
-스타일 선언은 바뀌지 않았지만 이 최종 해시를 새 네이티브 번들로 재캡처하지는 않았다.
+그 최종 head를 다시 Metro로 로드한 2.2초 production 설정에서 로그는 `claim-result → render →
+layout → acknowledged → claim-result null` 순서를 보였다. Maestro의 화면 settle보다 2.2초가 짧아
+blur 시뮬레이션에서만 표시 시간을 임시 20초로 늘렸고, 접근성 label selector로 다음 출력까지
+확인했다.
+
+```text
+Assert that "Milestone. 100 expressions mastered" is visible... COMPLETED
+Assert that "Milestone. 100 expressions mastered" is not visible... COMPLETED
+Assert that "128/502 mastered" is visible... COMPLETED
+```
+
+임시 시간·진단 로그는 제거했고, 이후 worktree는 clean이며 TypeScript가 다시 exit 0이었다.
 
 실제 스파링 `done` 경로의 helper 호출은 금지된 U3 파일 범위라 [unverified]이며, 웹 다중 탭의
 동시 claim과 실기기 VoiceOver/TalkBack·reduced-motion 동작도 [unverified]다.
