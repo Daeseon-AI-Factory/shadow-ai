@@ -2199,3 +2199,52 @@ Assert that "Hi, U2 Simulator" is visible... COMPLETED
 
 **Pattern.** 부모가 child key를 shared query 결과로 만들면, 낙관 UI 중 그 query를 갱신하지 말고
 세션 로컬 snapshot과 종료 후 authoritative reconciliation을 분리해야 한다.
+
+---
+
+## 2026-07-14 — 팩 mastery가 Practice 카드에 없고 축하 receipt 경계가 없음
+
+**Symptom.** U1의 `useMastery().byPack`은 8개 정적 팩 집계를 제공했지만 Practice 팩 카드는
+전체 수와 due만 표시했다. 마스터 100, 스트릭 7·30·100, 첫 스파링 완료를 한 번만 축하하는
+로컬 receipt나 토스트 컴포넌트도 없었다.
+
+**Cause (verified).** 구현 전 `practice.tsx`는 `practiceApi.srsStates()`로 due를 세는 경로만
+사용했고 `useMastery`를 import하지 않았다. 저장소 검색에서도 U4 마일스톤 ID와 receipt helper는
+존재하지 않았다.
+
+**Fix.** 구현 커밋 `dd65821ddc45af58c8b5a88b71300dbc7c74839e`에서 8개 카드에
+`PracticePackId`를 연결해 `mastered/total` 메타와 4px 진행바를 추가했다. 사용자별
+SecureStore(웹은 localStorage) 상태에는 이전 수치, 축하 완료, pending queue를 저장한다. Toast는
+focus된 Practice에서만 claim하고 실제 `onLayout` 뒤 receipt를 acknowledge한다. 레이아웃 전 blur는
+lease를 반환하고, 레이아웃 뒤 저장 중 blur는 직렬화된 acknowledge를 기다린다. reduced-motion이면
+scale·fade timing을 생략하고 iOS에서는 접근성 announcement를 보낸다.
+
+**Verification.** 최종 커밋 상태에서 `npx tsc --noEmit --pretty false --incremental false`와
+`git diff --cached --check`는 stdout 없이 exit 0이었다. 저장값을 99/6으로 만든 뒤 100/7을 넣은
+in-memory 시뮬레이션은 다음을 출력했다.
+
+```text
+{"manipulated":"99-to-100","concurrentClaims":1,"queued":["mastery-100","streak-7"],"repeat":null,"firstSparring":"one-time"}
+```
+
+별도 iOS Simulator의 다크 화면에서는 `100 expressions mastered`와 `0/1956 mastered`, 라이트·
+다크 재진입 흐름에서는 `128/502 mastered`를 확인했다. 같은 receipt로 Today→Practice를 다시
+열었을 때 자동화 출력은 `Assert that "100 expressions mastered" is not visible... COMPLETED`였다.
+이 캡처 뒤 최종 커밋에는 receipt 시점을 렌더 전에서 `onLayout` 뒤로 옮기고 접근성 속성을 추가했다.
+그 최종 head를 다시 Metro로 로드한 2.2초 production 설정에서 로그는 `claim-result → render →
+layout → acknowledged → claim-result null` 순서를 보였다. Maestro의 화면 settle보다 2.2초가 짧아
+blur 시뮬레이션에서만 표시 시간을 임시 20초로 늘렸고, 접근성 label selector로 다음 출력까지
+확인했다.
+
+```text
+Assert that "Milestone. 100 expressions mastered" is visible... COMPLETED
+Assert that "Milestone. 100 expressions mastered" is not visible... COMPLETED
+Assert that "128/502 mastered" is visible... COMPLETED
+```
+
+임시 시간·진단 로그는 제거했고, 이후 worktree는 clean이며 TypeScript가 다시 exit 0이었다.
+
+실제 스파링 `done` 경로의 helper 호출은 금지된 U3 파일 범위라 [unverified]이며, 웹 다중 탭의
+동시 claim과 실기기 VoiceOver/TalkBack·reduced-motion 동작도 [unverified]다.
+
+**Commit.** `dd65821ddc45af58c8b5a88b71300dbc7c74839e`.
