@@ -3,6 +3,7 @@
 // startup: a Korean device gets Korean, everything else falls back to English.
 import { getLocales } from 'expo-localization';
 import { messages, type Locale } from './i18n-messages';
+import { sessionMessages } from './i18n-session-messages';
 
 const code = getLocales()[0]?.languageCode;
 export const locale: Locale = code === 'ko' ? 'ko' : 'en';
@@ -11,7 +12,12 @@ type Vars = Record<string, string | number>;
 
 /** Translate a flat key (e.g. "home.welcome"), interpolating {placeholders}. Falls back to en, then the key. */
 export function t(key: string, vars?: Vars): string {
-  let s = messages[locale][key] ?? messages.en[key] ?? key;
+  let s =
+    sessionMessages[locale][key] ??
+    messages[locale][key] ??
+    sessionMessages.en[key] ??
+    messages.en[key] ??
+    key;
   if (vars) {
     for (const [k, v] of Object.entries(vars)) {
       s = s.split(`{${k}}`).join(String(v));

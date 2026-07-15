@@ -2,11 +2,18 @@ import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { ApiError, localToday, practiceApi } from '@shadow-ai/core';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  ApiError,
+  localToday,
+  practiceApi,
+  useMastery,
+  type SrsCard,
+} from '@shadow-ai/core';
 
 import { Card } from '@/components/card';
 import { Chip } from '@/components/chip';
+import { SessionSummary } from '@/components/session-summary';
 import { PrimaryButton } from '@/components/talk-button';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -14,6 +21,33 @@ import { useTheme } from '@/hooks/use-theme';
 import { t } from '@/lib/i18n';
 
 const ALERT_REOPEN_DELAY_MS = 350;
+const WARMUP_CREDIT = 1;
+
+type GradeAttempt = { key: string; ok: boolean };
+
+function monotonicSessionProgress(
+  previous: number,
+  completed: number,
+  queueLength: number,
+) {
+  if (queueLength <= 0) return 1;
+  const boundedCompleted = Math.min(Math.max(0, completed), queueLength);
+  const creditedProgress =
+    (boundedCompleted + WARMUP_CREDIT) / (queueLength + WARMUP_CREDIT);
+  return Math.max(previous, Math.min(1, creditedProgress));
+}
+
+function cardsRemaining(completed: number, queueLength: number) {
+  return Math.max(0, queueLength - completed);
+}
+
+function isFinalStretch(completed: number, queueLength: number) {
+  const remaining = cardsRemaining(completed, queueLength);
+  return (
+    remaining > 0 &&
+    remaining <= Math.max(1, Math.ceil(queueLength * 0.2))
+  );
+}
 
 export interface DrillItem {
   key: string; // SRS card key (pat:… / col:…)
@@ -41,18 +75,46 @@ export type DrillCheck = (
  * the learner's produced version before they reveal the model.
  */
 export function DrillRunner({ items, onCheck }: { items: DrillItem[]; onCheck?: DrillCheck }) {
+  const qc = useQueryClient();
+  const theme = useTheme();
   const [queue, setQueue] = useState<DrillItem[]>(items);
   const [pos, setPos] = useState(0);
   const [revealed, setRevealed] = useState(false);
-  const [got, setGot] = useState(0);
   const [streak, setStreak] = useState<number | null>(null);
+  const [sessionSrs, setSessionSrs] = useState<SrsCard[] | null>(() =>
+    qc.getQueryData<SrsCard[]>(['srs']) ?? null,
+  );
+  const [progress, setProgress] = useState(() =>
+    monotonicSessionProgress(0, 0, items.length),
+  );
+  const [pendingGrades, setPendingGrades] = useState(0);
   const [feedbackPending, setFeedbackPending] = useState(false);
   const graded = useRef<Set<string>>(new Set());
-  const gradingRef = useRef(false);
+  const advancingRef = useRef(false);
   const feedbackActiveRef = useRef(true);
   const feedbackPendingRef = useRef(false);
+  const feedbackQueueRef = useRef<GradeAttempt[]>([]);
+  const feedbackShowingRef = useRef(false);
   const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const qc = useQueryClient();
+  const submitGradeRef = useRef<(attempt: GradeAttempt) => void>(() => undefined);
+  const successfulGradeCardsRef = useRef<Map<string, SrsCard>>(new Map());
+  const srs = useQuery({
+    queryKey: ['srs'],
+    queryFn: () => practiceApi.srsStates(),
+    enabled: sessionSrs === null,
+  });
+  const mastery = useMastery(sessionSrs ?? []);
+
+  useEffect(() => {
+    if (!srs.data || sessionSrs !== null) return;
+    const next = [...srs.data];
+    for (const card of successfulGradeCardsRef.current.values()) {
+      const index = next.findIndex((candidate) => candidate.cardKey === card.cardKey);
+      if (index >= 0) next[index] = card;
+      else next.push(card);
+    }
+    setSessionSrs(next);
+  }, [sessionSrs, srs.data]);
 
   useEffect(() => {
     feedbackActiveRef.current = true;
@@ -62,62 +124,109 @@ export function DrillRunner({ items, onCheck }: { items: DrillItem[]; onCheck?: 
       feedbackActiveRef.current = false;
       if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
       feedbackTimerRef.current = null;
+      feedbackQueueRef.current = [];
+      feedbackShowingRef.current = false;
       feedbackPendingRef.current = false;
     };
   }, []);
 
-  const releaseGradeFeedback = () => {
-    if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
-    feedbackTimerRef.current = null;
-    feedbackPendingRef.current = false;
-    if (feedbackActiveRef.current) setFeedbackPending(false);
-  };
+  useEffect(() => {
+    advancingRef.current = false;
+  }, [pos]);
 
-  const queueGradeFeedback = (ok: boolean) => {
-    if (!feedbackActiveRef.current) return;
+  const showNextGradeFeedback = () => {
+    if (!feedbackActiveRef.current || feedbackShowingRef.current) return;
+    const attempt = feedbackQueueRef.current.shift();
+    if (!attempt) {
+      feedbackPendingRef.current = false;
+      setFeedbackPending(false);
+      return;
+    }
+
+    feedbackShowingRef.current = true;
     feedbackPendingRef.current = true;
     setFeedbackPending(true);
     if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
     feedbackTimerRef.current = setTimeout(() => {
       feedbackTimerRef.current = null;
       if (!feedbackActiveRef.current) {
-        releaseGradeFeedback();
+        feedbackQueueRef.current = [];
+        feedbackShowingRef.current = false;
+        feedbackPendingRef.current = false;
         return;
       }
+
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        feedbackShowingRef.current = false;
+        showNextGradeFeedback();
+      };
       Alert.alert(
         t('feedback.gradeFailedTitle'),
-        t('feedback.gradeFailedStayMessage'),
+        t('feedback.gradeFailedContinueMessage'),
         [
-          { text: t('common.cancel'), style: 'cancel', onPress: releaseGradeFeedback },
+          { text: t('common.cancel'), style: 'cancel', onPress: finish },
           {
             text: t('common.retry'),
             onPress: () => {
-              releaseGradeFeedback();
-              if (!feedbackActiveRef.current) return;
-              answer(ok);
+              if (feedbackActiveRef.current) submitGradeRef.current(attempt);
+              finish();
             },
           },
         ],
-        { cancelable: true, onDismiss: releaseGradeFeedback },
+        { cancelable: true, onDismiss: finish },
       );
     }, ALERT_REOPEN_DELAY_MS);
   };
 
+  const queueGradeFeedback = (attempt: GradeAttempt) => {
+    if (!feedbackActiveRef.current) return;
+    feedbackQueueRef.current.push(attempt);
+    showNextGradeFeedback();
+  };
+
   const grade = useMutation({
-    mutationFn: ({ key, ok }: { key: string; ok: boolean }) =>
+    mutationFn: ({ key, ok }: GradeAttempt) =>
       practiceApi.grade(key, ok, localToday()),
     onSuccess: (res) => {
-      // Due/new counts + lapse/mastered stats shift after every grade — refresh the SRS-backed
-      // screens (Pattern, Collocation, Weak spots) so they don't show pre-grade state.
-      qc.invalidateQueries({ queryKey: ['srs'] });
+      successfulGradeCardsRef.current.set(res.card.cardKey, res.card);
+      setSessionSrs((current) => {
+        if (!current) return current;
+        const next = [...current];
+        const index = next.findIndex((card) => card.cardKey === res.card.cardKey);
+        if (index >= 0) next[index] = res.card;
+        else next.push(res.card);
+        return next;
+      });
+      // Mark the shared list stale without refetching it under an active drill. A live refetch
+      // changes parent-built session keys (notably Today) and remounts this runner mid-session.
+      // The next SRS screen mount will fetch the authoritative list.
+      void qc.invalidateQueries({ queryKey: ['srs'], refetchType: 'none' });
       if (!feedbackActiveRef.current) return;
       setStreak(res.progress.streak);
     },
-    onError: (error, { ok }) => {
+    onError: (error, attempt) => {
       if (error instanceof ApiError && error.status === 401) return;
-      queueGradeFeedback(ok);
+      // A lost response can still mean the server applied the non-idempotent grade.
+      // Keep the cache stale for later reconciliation, then let the learner explicitly choose
+      // whether to retry it without remounting the active session.
+      void qc.invalidateQueries({ queryKey: ['srs'], refetchType: 'none' });
+      queueGradeFeedback(attempt);
+    },
+    onSettled: () => {
+      if (feedbackActiveRef.current) {
+        setPendingGrades((count) => Math.max(0, count - 1));
+      }
     },
   });
+  const submitGrade = (attempt: GradeAttempt) => {
+    if (!feedbackActiveRef.current) return;
+    setPendingGrades((count) => count + 1);
+    grade.mutate(attempt);
+  };
+  submitGradeRef.current = submitGrade;
 
   if (items.length === 0) {
     return (
@@ -139,24 +248,26 @@ export function DrillRunner({ items, onCheck }: { items: DrillItem[]; onCheck?: 
 
   const done = pos >= queue.length;
 
-  const answer = async (ok: boolean) => {
-    if (!feedbackActiveRef.current || feedbackPendingRef.current) return;
+  const answer = (ok: boolean) => {
+    if (
+      !feedbackActiveRef.current ||
+      feedbackPendingRef.current ||
+      advancingRef.current
+    ) return;
     const cur = queue[pos];
+    if (!cur) return;
+    advancingRef.current = true;
+
     if (!graded.current.has(cur.key)) {
-      if (gradingRef.current) return;
-      gradingRef.current = true;
-      try {
-        await grade.mutateAsync({ key: cur.key, ok });
-      } catch {
-        // The mutation-level onError explains the retry. Keep this card in place.
-        return;
-      } finally {
-        gradingRef.current = false;
-      }
-      if (!feedbackActiveRef.current) return;
       graded.current.add(cur.key);
-      if (ok) setGot((g) => g + 1);
+      submitGrade({ key: cur.key, ok });
     }
+
+    const nextQueueLength = queue.length + (ok ? 0 : 1);
+    const nextCompleted = pos + 1;
+    setProgress((previous) =>
+      monotonicSessionProgress(previous, nextCompleted, nextQueueLength),
+    );
     if (!ok) setQueue((q) => [...q, cur]);
     setRevealed(false);
     setPos((p) => p + 1);
@@ -165,26 +276,37 @@ export function DrillRunner({ items, onCheck }: { items: DrillItem[]; onCheck?: 
   if (done) {
     return (
       <ThemedView style={styles.flex}>
-        <SafeAreaView style={[styles.flex, styles.center]}>
-          <ThemedText type="title">{t('drill.done')}</ThemedText>
-          <ThemedText type="small">
-            {t('drill.firstTry', { got, total: items.length })}
-          </ThemedText>
-          {streak !== null && (
-            <ThemedText type="small">{t('drill.streak', { n: streak })}</ThemedText>
-          )}
-          <PrimaryButton
-            style={styles.primaryBtn}
-            onPress={() => router.replace('/')}
-          >
-            {t('drill.home')}
-          </PrimaryButton>
+        <SafeAreaView style={styles.flex}>
+          <SessionSummary
+            title={t('sessionSummary.drillTitle')}
+            metrics={[
+              {
+                id: 'practice',
+                value: pos,
+                label: t('sessionSummary.practice'),
+                tone: 'primary',
+              },
+              {
+                id: 'mastered',
+                value: sessionSrs ? mastery.mastered : '—',
+                label: t('sessionSummary.mastered'),
+                tone: 'mint',
+              },
+            ]}
+            streak={streak}
+            confirmLabel={t('sessionSummary.confirm')}
+            confirmDisabled={pendingGrades > 0 || feedbackPending}
+            onConfirm={() => router.replace('/')}
+          />
         </SafeAreaView>
       </ThemedView>
     );
   }
 
   const item = queue[pos];
+  const remaining = cardsRemaining(pos, queue.length);
+  const finalStretch = isFinalStretch(pos, queue.length);
+  const progressWidth = `${Math.round(progress * 100)}%` as `${number}%`;
 
   return (
     <ThemedView style={styles.flex}>
@@ -195,9 +317,39 @@ export function DrillRunner({ items, onCheck }: { items: DrillItem[]; onCheck?: 
           automaticallyAdjustKeyboardInsets
           keyboardDismissMode="interactive"
         >
-          <ThemedText type="small">
-            {pos + 1} / {queue.length}
-            {streak !== null ? `   🔥 ${streak}` : ''}
+          <View
+            accessibilityRole="progressbar"
+            accessibilityValue={{
+              min: 0,
+              max: 100,
+              now: Math.round(progress * 100),
+              text: t('drill.progressA11y', { completed: pos, total: queue.length }),
+            }}
+            style={[styles.progressTrack, { backgroundColor: theme.border }]}
+          >
+            <View
+              style={[
+                styles.progressFill,
+                {
+                  backgroundColor: finalStretch ? theme.amber : theme.primary,
+                  width: progressWidth,
+                },
+              ]}
+            />
+          </View>
+          <View style={styles.progressHeader}>
+            <ThemedText type="smallBold">
+              {pos + 1} / {queue.length}
+              {streak !== null ? `   🔥 ${streak}` : ''}
+            </ThemedText>
+            {finalStretch ? (
+              <ThemedText type="smallBold" style={{ color: theme.amber }}>
+                {t('drill.remaining', { n: remaining })}
+              </ThemedText>
+            ) : null}
+          </View>
+          <ThemedText type="small" themeColor="textSecondary">
+            {t('drill.warmupCredit')}
           </ThemedText>
 
           <View style={styles.frameBox}>
@@ -241,7 +393,7 @@ export function DrillRunner({ items, onCheck }: { items: DrillItem[]; onCheck?: 
                   tone="live"
                   style={styles.gradeBtn}
                   textStyle={styles.gradeText}
-                  disabled={grade.isPending || feedbackPending}
+                  disabled={feedbackPending}
                   onPress={() => answer(false)}
                 >
                   {t('drill.again')}
@@ -250,7 +402,7 @@ export function DrillRunner({ items, onCheck }: { items: DrillItem[]; onCheck?: 
                   tone="mint"
                   style={styles.gradeBtn}
                   textStyle={styles.gradeText}
-                  disabled={grade.isPending || feedbackPending}
+                  disabled={feedbackPending}
                   onPress={() => answer(true)}
                 >
                   {t('drill.gotIt')}
@@ -325,6 +477,20 @@ const styles = StyleSheet.create({
   container: { flexGrow: 1, padding: 24, gap: 18 },
   gap: { gap: 12 },
   row: { flexDirection: 'row', gap: 12 },
+  progressHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  progressTrack: {
+    borderRadius: 999,
+    height: 10,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    borderRadius: 999,
+    height: '100%',
+  },
   subtitle: { textTransform: 'uppercase', letterSpacing: 1 },
   frameBox: { alignItems: 'center', gap: 6, marginTop: 8 },
   frame: { fontSize: 18, textAlign: 'center' },
