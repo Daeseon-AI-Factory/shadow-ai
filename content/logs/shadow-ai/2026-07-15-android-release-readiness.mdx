@@ -115,3 +115,31 @@ Two release gates remain deliberately open:
 TypeScript printed `tsc_exit=0`. A static source scan found 31 unique Android symbol names and zero names
 missing from Expo's Android symbol map, but this does not replace the authenticated screen-by-screen
 acceptance test.
+
+## Evidence after the platform-font split
+
+The follow-up platform-file change in commit `30db598a8588cba7b0075bed352d1e5a20d4752c` removes Android
+Material Symbol fonts from the iOS export while keeping them in Android. The current source produced a
+native release APK and AAB with these independent checks:
+
+```text
+APK: 110161198 bytes
+APK SHA-256: 91ad0f3e8b8f199522e21f63cb09cf58d11354c64ba9edce5c668d9b652404e3
+Verifies
+Verified using v2 scheme (APK Signature Scheme v2): true
+
+AAB: 76823624 bytes
+AAB SHA-256: 2b39ceb5742e3d52a991dedac42bf76515704241ef54cdfcc6cdddacc651fd63
+No errors detected in compressed data
+```
+
+The generated release Gradle block uses `signingConfig signingConfigs.debug`, so these are current-source
+native build artifacts, not production-signing evidence. The APK installed with `Success`, cold-launched
+`ai.daeseon.mimi/.MainActivity` with `Status: ok`, and the onboarding capture rendered the Android bold
+waveform symbol.
+
+A new EAS local production attempt loaded the stored production keystore and used local version code 2
+with auto-increment disabled. Expo Doctor still printed `19/21 checks passed`. The build did not produce
+an artifact: it ended with exit code 143 and `[ABORT] Received termination signal.` The earlier
+production-signed AAB therefore predates the platform-font split, while the latest source currently has
+only debug-signed native artifact evidence.

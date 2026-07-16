@@ -2397,8 +2397,22 @@ BUILD SUCCESSFUL in 2m 46s
 
 Its AAB is 76,823,624 bytes with SHA-256
 `2b39ceb5742e3d52a991dedac42bf76515704241ef54cdfcc6cdddacc651fd63`; ZIP integrity reported no errors
-and `jarsigner` printed `jar verified` with warnings. iOS native compilation and Play acceptance remain
-[unverified].
+and `jarsigner` printed `jar verified` with warnings. The generated release configuration explicitly uses
+`signingConfig signingConfigs.debug`, so this current-source AAB is a native build check rather than a
+production-signing check.
+
+The matching current-source APK is 110,161,198 bytes with SHA-256
+`91ad0f3e8b8f199522e21f63cb09cf58d11354c64ba9edce5c668d9b652404e3`; `apksigner` printed `Verifies`
+and `Verified using v2 scheme ... true`. It installed with `Success`, cold-launched
+`ai.daeseon.mimi/.MainActivity` with `Status: ok`, and the onboarding capture rendered the Android bold
+waveform symbol. The emulator is not a persistent release gate: a later device query returned an empty
+device list.
+
+A fresh EAS local production build was then attempted from the same source with local version code 2,
+`autoIncrement=false`, and the stored production keystore. EAS reported `19/21 checks passed` before
+continuing the native build, but the process ended before artifact creation with exit code 143 and
+`[ABORT] Received termination signal.` No current-source production-signed AAB was produced. iOS native
+compilation, authenticated Android flows, and Play acceptance remain [unverified].
 
 **Commit.** `30db598a8588cba7b0075bed352d1e5a20d4752c`.
 

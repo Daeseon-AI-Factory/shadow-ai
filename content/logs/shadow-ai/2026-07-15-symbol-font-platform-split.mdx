@@ -66,7 +66,18 @@ BUILD SUCCESSFUL in 2m 46s
 That AAB is 76,823,624 bytes with SHA-256
 `2b39ceb5742e3d52a991dedac42bf76515704241ef54cdfcc6cdddacc651fd63`. ZIP integrity reported no errors;
 `jarsigner` printed `jar verified` with the same warning class already recorded in the Android readiness
-audit. This is a local verification bundle, not a Play Console submission. iOS native compilation remains
+audit. The generated release block uses `signingConfig signingConfigs.debug`, so this is a current-source
+native verification bundle, not a production-signing or Play Console check.
+
+The matching APK is 110,161,198 bytes with SHA-256
+`91ad0f3e8b8f199522e21f63cb09cf58d11354c64ba9edce5c668d9b652404e3`. `apksigner` printed `Verifies`
+and confirmed v2 signing. It installed successfully, cold-launched Mimi, and the onboarding capture showed
+the bold Android waveform symbol.
+
+A separate EAS local production build used local version code 2, disabled auto-increment, and loaded the
+stored production keystore. Expo Doctor printed `19/21 checks passed`; the native build later ended with
+exit code 143 and `[ABORT] Received termination signal.` The requested output file was absent afterward,
+so a current-source production-signed AAB, iOS native compilation, and Play Console acceptance remain
 unverified.
 
 ## Lesson
