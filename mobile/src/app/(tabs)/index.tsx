@@ -14,7 +14,6 @@ import {
 } from '@shadow-ai/core';
 
 import { Card } from '@/components/card';
-import { ErrorState } from '@/components/error-state';
 import {
   isStreakAtRisk,
   MasterySummary,
@@ -159,27 +158,17 @@ export default function TodayScreen() {
   }
   if (!token) return <Redirect href="/login" />;
 
-  const reviewLoading = streak.data === undefined;
+  const reviewLoading = streak.isPending;
+  const reviewUnavailable = streak.isError && streak.data === undefined;
   const due = streak.data?.dueToday ?? 0;
-
-  // Greeting and the existing ink streak remain load-bearing. Supplemental progress and clip
-  // outages stay inside their own surfaces so the stable Home destinations remain usable.
-  if ((me.isError && !me.data) || (streak.isError && !streak.data)) {
-    return (
-      <ThemedView style={styles.flex}>
-        <SafeAreaView style={styles.flex} edges={['top']}>
-          <ErrorState
-            onRetry={() => {
-              void Promise.all([
-                me.refetch(),
-                streak.refetch(),
-              ]);
-            }}
-          />
-        </SafeAreaView>
-      </ThemedView>
-    );
-  }
+  const reviewTitle = reviewLoading
+    ? t('today.reviewLoading')
+    : reviewUnavailable
+      ? t('nav.review')
+      : t('today.dueToday', { n: due });
+  const reviewAccessibilityLabel = reviewLoading
+    ? reviewTitle
+    : `${reviewTitle}. ${t('today.reviewSub')}`;
 
   const streakDays = streak.data?.streakDays ?? 0;
   return (
@@ -205,11 +194,7 @@ export default function TodayScreen() {
               haptic.tap();
               router.push('/review');
             }}
-            accessibilityLabel={
-              reviewLoading
-                ? t('today.reviewLoading')
-                : `${t('today.dueToday', { n: due })}. ${t('today.reviewSub')}`
-            }
+            accessibilityLabel={reviewAccessibilityLabel}
             accessibilityState={{ busy: reviewLoading }}
           >
             <View style={[styles.reviewIcon, { backgroundColor: theme.surfaceRaised }]}>
@@ -222,7 +207,7 @@ export default function TodayScreen() {
             </View>
             <View style={styles.reviewCopy}>
               <ThemedText type="section" maxFontSizeMultiplier={1.2}>
-                {reviewLoading ? t('today.reviewLoading') : t('today.dueToday', { n: due })}
+                {reviewTitle}
               </ThemedText>
               <ThemedText type="small" themeColor="textSecondary" maxFontSizeMultiplier={1.35}>
                 {t('today.reviewSub')}
@@ -266,6 +251,12 @@ export default function TodayScreen() {
             {streak.isPending ? (
               <View style={styles.streakLoading}>
                 <ActivityIndicator color={Colors.dark.text} />
+              </View>
+            ) : reviewUnavailable ? (
+              <View style={styles.streakLoading}>
+                <ThemedText type="small" style={{ color: Colors.dark.textSecondary }}>
+                  {t('common.errorTitle')}
+                </ThemedText>
               </View>
             ) : (
               <View style={styles.streakStats}>
