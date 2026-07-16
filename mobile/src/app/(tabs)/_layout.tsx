@@ -1,4 +1,4 @@
-import { Pressable, StyleSheet, Text, View, type ColorValue } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View, type ColorValue } from 'react-native';
 import { Tabs } from 'expo-router';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -12,7 +12,10 @@ type SymbolName = SymbolViewProps['name'];
 // @react-navigation/bottom-tabs types, which aren't a direct dependency here).
 type TabBarButtonProps = {
   onPress?: (...args: any[]) => void;
+  onLongPress?: ((...args: any[]) => void) | null;
   accessibilityState?: { selected?: boolean };
+  'aria-label'?: string;
+  'aria-selected'?: boolean;
 };
 
 export default function TabsLayout() {
@@ -40,14 +43,23 @@ export default function TabsLayout() {
 
   // Sparring is the app's one loud action — a raised, "live" coral center button, not a flat tab.
   // Its own color signals it's a different KIND of place (a conversation, not a study surface).
-  const SparringTabButton = ({ onPress, accessibilityState }: TabBarButtonProps) => {
-    const active = !!accessibilityState?.selected;
+  const SparringTabButton = ({
+    onPress,
+    onLongPress,
+    accessibilityState,
+    'aria-label': ariaLabel,
+    'aria-selected': ariaSelected,
+  }: TabBarButtonProps) => {
+    // Expo Router 56 passes the focused state as aria-selected. Keep the legacy
+    // accessibilityState fallback so the shared tab stays usable across Router revisions.
+    const active = ariaSelected ?? accessibilityState?.selected ?? false;
     return (
       <Pressable
         onPress={onPress}
-        accessibilityRole="button"
+        onLongPress={onLongPress}
+        accessibilityRole={Platform.OS === 'ios' ? 'button' : 'tab'}
         accessibilityState={{ selected: active }}
-        accessibilityLabel={t('nav.sparring')}
+        accessibilityLabel={ariaLabel ?? t('nav.sparring')}
         style={styles.centerWrap}
       >
         {({ pressed }) => (
@@ -92,7 +104,7 @@ export default function TabsLayout() {
         tabBarLabelStyle: { fontSize: 11, fontWeight: '700' },
       }}
     >
-      {/* Order = tab-bar order: Today · Practice · [Sparring] · Review · Me */}
+      {/* Order = tab-bar order: Home · Shadow · [Speaking] · Write · Me */}
       <Tabs.Screen
         name="index"
         options={{
@@ -102,10 +114,14 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
-        name="practice"
+        name="videos"
         options={{
-          title: t('nav.practiceTab'),
-          tabBarIcon: tabIcon({ ios: 'graduationcap.fill', android: 'school', web: 'school' }),
+          title: t('nav.shadowing'),
+          tabBarIcon: tabIcon({
+            ios: 'play.rectangle.fill',
+            android: 'smart_display',
+            web: 'smart_display',
+          }),
         }}
       />
       {/* The hero — its own studio room, no native header. */}
@@ -118,10 +134,14 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
-        name="review"
+        name="compose"
         options={{
-          title: t('nav.review'),
-          tabBarIcon: tabIcon({ ios: 'arrow.triangle.2.circlepath', android: 'sync', web: 'sync' }),
+          title: t('nav.write'),
+          tabBarIcon: tabIcon({
+            ios: 'square.and.pencil',
+            android: 'edit_note',
+            web: 'edit_note',
+          }),
         }}
       />
       <Tabs.Screen
@@ -131,8 +151,9 @@ export default function TabsLayout() {
           tabBarIcon: tabIcon({ ios: 'person.fill', android: 'person', web: 'person' }),
         }}
       />
-      {/* Library folds into Home ("My clips") — reachable via router, off the tab bar. */}
-      <Tabs.Screen name="videos" options={{ href: null, title: t('nav.library') }} />
+      {/* Reference and review routes stay alive, but Home owns their entry points. */}
+      <Tabs.Screen name="practice" options={{ href: null, title: t('nav.practiceTab') }} />
+      <Tabs.Screen name="review" options={{ href: null, title: t('nav.review') }} />
     </Tabs>
   );
 }

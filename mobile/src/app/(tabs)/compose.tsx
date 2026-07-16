@@ -57,9 +57,14 @@ export default function ComposeScreen() {
   if (inviteOnly) {
     return (
       <ThemedView style={styles.flex}>
-        <SafeAreaView style={styles.flex}>
+        <SafeAreaView style={styles.flex} edges={['bottom']}>
           <View style={styles.inviteScreen}>
-            <View style={styles.inviteCard}>
+            <View
+              style={[
+                styles.inviteCard,
+                { backgroundColor: theme.backgroundSelected, borderColor: theme.amber },
+              ]}
+            >
               <ThemedText style={styles.inviteIcon}>🔒</ThemedText>
               <ThemedText type="title" style={styles.inviteTitle}>
                 {t('aiInvite.title')}
@@ -68,11 +73,13 @@ export default function ComposeScreen() {
                 {t('aiInvite.body')}
               </ThemedText>
               <Pressable
-                style={styles.inviteButton}
+                style={[styles.inviteButton, { backgroundColor: theme.primary }]}
                 onPress={() => router.replace('/practice')}
                 accessibilityRole="button"
               >
-                <ThemedText style={styles.inviteButtonText}>{t('aiInvite.freePractice')}</ThemedText>
+                <ThemedText style={[styles.inviteButtonText, { color: theme.onPrimary }]}>
+                  {t('aiInvite.freePractice')}
+                </ThemedText>
               </Pressable>
             </View>
           </View>
@@ -83,7 +90,7 @@ export default function ComposeScreen() {
 
   return (
     <ThemedView style={styles.flex}>
-      <SafeAreaView style={styles.flex}>
+      <SafeAreaView style={styles.flex} edges={['bottom']}>
         <KeyboardAvoidingView
           style={styles.flex}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -92,7 +99,12 @@ export default function ComposeScreen() {
             <ThemedText type="title">{t('compose.title')}</ThemedText>
             <ThemedText type="small">{t('compose.subtitle')}</ThemedText>
 
-            <View style={styles.targetBox}>
+            <View
+              style={[
+                styles.targetBox,
+                { backgroundColor: theme.backgroundElement, borderColor: theme.border },
+              ]}
+            >
               <ThemedText type="small">{t('compose.useThis')}</ThemedText>
               <ThemedText style={[styles.target, { color: theme.primary }]}>{current.target}</ThemedText>
               <ThemedText type="small">{current.gloss}</ThemedText>
@@ -115,10 +127,18 @@ export default function ComposeScreen() {
               onChangeText={setText}
             />
 
-            {errorMessage && <ThemedText style={styles.error}>{errorMessage}</ThemedText>}
+            {errorMessage && <ThemedText style={{ color: theme.live }}>{errorMessage}</ThemedText>}
 
             {fb && (
-              <View style={[styles.fbBox, fb.ok ? styles.fbOk : styles.fbWork]}>
+              <View
+                style={[
+                  styles.fbBox,
+                  {
+                    backgroundColor: fb.ok ? theme.mintSoft : theme.backgroundSelected,
+                    borderColor: fb.ok ? theme.mint : theme.amber,
+                  },
+                ]}
+              >
                 <ThemedText type="smallBold">
                   {fb.ok ? t('compose.good') : t('compose.needsWork')}
                   {!fb.usesTarget ? t('compose.targetNotUsed') : ''}
@@ -134,22 +154,29 @@ export default function ComposeScreen() {
               <Pressable
                 style={pressableStyle([
                   styles.primaryBtn,
+                  { backgroundColor: theme.primary },
                   (!text.trim() || check.isPending) && styles.disabled,
                 ])}
                 android_ripple={pressableRipple}
                 disabled={!text.trim() || check.isPending}
                 onPress={() => check.mutate()}
+                accessibilityRole="button"
+                accessibilityLabel={t('compose.check')}
               >
                 {check.isPending ? (
-                  <ActivityIndicator color="#fff" />
+                  <ActivityIndicator color={theme.onPrimary} />
                 ) : (
-                  <ThemedText style={styles.primaryText}>{t('compose.check')}</ThemedText>
+                  <ThemedText style={[styles.primaryText, { color: theme.onPrimary }]}>
+                    {t('compose.check')}
+                  </ThemedText>
                 )}
               </Pressable>
               <Pressable
-                style={pressableStyle(styles.secondaryBtn)}
+                style={pressableStyle([styles.secondaryBtn, { borderColor: theme.border }])}
                 android_ripple={pressableRipple}
                 onPress={next}
+                accessibilityRole="button"
+                accessibilityLabel={t('compose.next')}
               >
                 <ThemedText style={styles.secondaryText}>{t('compose.next')}</ThemedText>
               </Pressable>
@@ -167,7 +194,6 @@ const styles = StyleSheet.create({
   targetBox: {
     borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#9ca3af',
     padding: 16,
     alignItems: 'center',
     gap: 4,
@@ -182,16 +208,11 @@ const styles = StyleSheet.create({
     minHeight: 90,
     textAlignVertical: 'top',
   },
-  error: { color: '#dc2626' },
   fbBox: { borderRadius: 12, borderWidth: 1, padding: 14, gap: 6 },
-  fbOk: { borderColor: '#10b98155', backgroundColor: '#10b98111' },
-  fbWork: { borderColor: '#f59e0b55', backgroundColor: '#f59e0b11' },
   better: { fontStyle: 'italic' },
   inviteScreen: { flex: 1, justifyContent: 'center', padding: 24 },
   inviteCard: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#f59e0b88',
-    backgroundColor: '#f59e0b12',
     borderRadius: 18,
     padding: 24,
     alignItems: 'center',
@@ -204,30 +225,27 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
     minHeight: 48,
     borderRadius: 12,
-    backgroundColor: '#208AEF',
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 16,
     marginTop: 4,
   },
-  inviteButtonText: { color: '#fff', fontWeight: '700' },
+  inviteButtonText: { fontWeight: '700' },
   row: { flexDirection: 'row', gap: 12, marginTop: 4 },
   primaryBtn: {
     flex: 1,
-    backgroundColor: '#208AEF',
     borderRadius: 10,
     paddingVertical: 14,
     alignItems: 'center',
   },
   disabled: { opacity: 0.5 },
-  primaryText: { color: '#fff', fontWeight: '700', fontSize: 16 },
+  primaryText: { fontWeight: '700', fontSize: 16 },
   secondaryBtn: {
     borderRadius: 10,
     paddingVertical: 14,
     paddingHorizontal: 20,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#9ca3af',
   },
   secondaryText: { fontWeight: '600' },
 });

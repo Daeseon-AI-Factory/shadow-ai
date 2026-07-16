@@ -6,7 +6,6 @@ import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { useQuery } from '@tanstack/react-query';
 import {
   authApi,
-  clipsApi,
   localToday,
   practiceApi,
   reviewApi,
@@ -107,13 +106,6 @@ export default function TodayScreen() {
     enabled: !!token,
     retry: false,
   });
-  // size:1 with the default "newest" sort keeps the existing recent-clip state user-scoped.
-  const recent = useQuery({
-    queryKey: ['clips', 'recent'],
-    queryFn: () => clipsApi.list({ size: 1 }),
-    enabled: !!token,
-    retry: false,
-  });
   const mastery = useMastery(srs.data ?? []);
   const rhythm = practiceProgress.data
     ? selectPracticeRhythm(practiceProgress.data)
@@ -139,7 +131,7 @@ export default function TodayScreen() {
       let active = true;
       setNudgeRefreshReady(false);
       const progressRefresh = practiceProgress.refetch();
-      void Promise.all([streak.refetch(), recent.refetch(), srs.refetch(), progressRefresh]);
+      void Promise.all([streak.refetch(), srs.refetch(), progressRefresh]);
       void progressRefresh.then((result) => {
         if (active) setNudgeRefreshReady(result.status === 'success');
       });
@@ -153,7 +145,6 @@ export default function TodayScreen() {
       today,
       refreshRevision,
       streak.refetch,
-      recent.refetch,
       srs.refetch,
       practiceProgress.refetch,
     ]),
@@ -168,6 +159,7 @@ export default function TodayScreen() {
   }
   if (!token) return <Redirect href="/login" />;
 
+  const reviewLoading = streak.data === undefined;
   const due = streak.data?.dueToday ?? 0;
 
   // Greeting and the existing ink streak remain load-bearing. Supplemental progress and clip
@@ -181,7 +173,6 @@ export default function TodayScreen() {
               void Promise.all([
                 me.refetch(),
                 streak.refetch(),
-                recent.refetch(),
               ]);
             }}
           />
@@ -191,12 +182,6 @@ export default function TodayScreen() {
   }
 
   const streakDays = streak.data?.streakDays ?? 0;
-  const clipMeta = recent.data
-    ? t('videos.clipCount', { count: recent.data.total })
-    : recent.isPending
-      ? '…'
-      : '—';
-
   return (
     <ThemedView style={styles.flex}>
       <SafeAreaView style={styles.flex} edges={['top']}>
@@ -209,6 +194,51 @@ export default function TodayScreen() {
               {me.data ? t('today.hi', { name: SCREENSHOT_DISPLAY_NAME || me.data.displayName }) : t('today.hiPlain')}
             </ThemedText>
           </View>
+
+          <Card
+            accent="amber"
+            style={[
+              styles.reviewCard,
+              { backgroundColor: theme.backgroundSelected, borderColor: theme.amber },
+            ]}
+            onPress={() => {
+              haptic.tap();
+              router.push('/review');
+            }}
+            accessibilityLabel={
+              reviewLoading
+                ? t('today.reviewLoading')
+                : `${t('today.dueToday', { n: due })}. ${t('today.reviewSub')}`
+            }
+            accessibilityState={{ busy: reviewLoading }}
+          >
+            <View style={[styles.reviewIcon, { backgroundColor: theme.surfaceRaised }]}>
+              <SymbolView
+                name={{ ios: 'star.fill', android: 'star', web: 'star' }}
+                size={26}
+                weight={SYMBOL_WEIGHT}
+                tintColor={theme.amber}
+              />
+            </View>
+            <View style={styles.reviewCopy}>
+              <ThemedText type="section" maxFontSizeMultiplier={1.2}>
+                {reviewLoading ? t('today.reviewLoading') : t('today.dueToday', { n: due })}
+              </ThemedText>
+              <ThemedText type="small" themeColor="textSecondary" maxFontSizeMultiplier={1.35}>
+                {t('today.reviewSub')}
+              </ThemedText>
+            </View>
+            {reviewLoading ? (
+              <ActivityIndicator color={theme.amber} />
+            ) : (
+              <SymbolView
+                name={{ ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }}
+                size={22}
+                weight={SYMBOL_WEIGHT}
+                tintColor={theme.textSecondary}
+              />
+            )}
+          </Card>
 
           <Card
             accent="amber"
@@ -321,10 +351,10 @@ export default function TodayScreen() {
               onPress={() => router.push('/today')}
             />
             <HomeTile
-              icon={{ ios: 'rectangle.stack.fill', android: 'view_carousel', web: 'view_carousel' }}
-              title={t('today.myClips')}
-              meta={clipMeta}
-              onPress={() => router.push('/videos')}
+              icon={{ ios: 'graduationcap.fill', android: 'school', web: 'school' }}
+              title={t('home.practiceMaterials')}
+              meta={t('home.practiceMaterialsSub')}
+              onPress={() => router.push('/practice')}
             />
             <HomeTile
               icon={{ ios: 'scope', android: 'gps_fixed', web: 'gps_fixed' }}
@@ -393,6 +423,21 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   container: { padding: 20, gap: 16, paddingBottom: 32 },
   head: { gap: 4, marginTop: 4 },
+  reviewCard: {
+    minHeight: 112,
+    padding: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+  },
+  reviewIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reviewCopy: { flex: 1, gap: 4 },
   streakCard: { minHeight: 150, gap: 14, padding: 20 },
   streakLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 8, position: 'relative', zIndex: 1 },
   streakLoading: {

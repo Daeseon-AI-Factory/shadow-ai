@@ -116,8 +116,8 @@ export default function RootLayout() {
     <QueryClientProvider client={queryClient}>
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
         <Stack initialRouteName={token ? '(tabs)' : 'login'} screenOptions={{ headerShown: false }}>
-          {/* Home / My Videos / Review / Practice / Settings live in the (tabs) group's own
-              bottom-tab navigator. Everything below is pushed on top of the tab bar. */}
+          {/* Home / Shadowing / Speaking / Write / Me live in the (tabs) group's own
+              bottom-tab navigator. Practice and Review stay in that group as hidden routes. */}
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="login" />
           <Stack.Screen name="signup" options={{ presentation: 'modal' }} />
@@ -133,7 +133,6 @@ export default function RootLayout() {
           <Stack.Screen name="mix" options={{ headerShown: true, title: t('nav.mix') }} />
           <Stack.Screen name="story" options={{ headerShown: true, title: t('nav.story') }} />
           <Stack.Screen name="today" options={{ headerShown: true, title: t('nav.today') }} />
-          <Stack.Screen name="compose" options={{ headerShown: true, title: t('nav.compose') }} />
           <Stack.Screen name="weak" options={{ headerShown: true, title: t('nav.weak') }} />
           <Stack.Screen name="prepositions" options={{ headerShown: true, title: t('nav.prepositions') }} />
           <Stack.Screen name="video/[id]" options={{ headerShown: true, title: t('nav.video') }} />
