@@ -1,0 +1,80 @@
+---
+title: "Android readiness and the three-pillar navigation now share one verified candidate"
+date: "2026-07-16"
+project: "shadow-ai"
+kind: "integration-retro"
+visibility: "public"
+language: "en"
+summary: "Combined the Android platform fixes with Mimi's five-tab information architecture, closed theme and error-path gaps exposed by the merge, and rebuilt the current candidate for both platforms."
+tags: ["mobile", "android", "expo", "navigation", "integration"]
+---
+
+## Why the merge needed its own acceptance pass
+
+The Android readiness track and the menu track were both valid in isolation, but they changed the same
+tab layout for different reasons. One added measured bottom insets and Android-specific symbol weights;
+the other established Home · Shadow · Speaking · Write · Me and updated the custom center tab for Expo
+Router 56. Choosing either side of the conflict wholesale would silently drop a requirement from the
+other track.
+
+The merged tree also exposed two gaps that neither branch's happy-path result covered. The newly promoted
+Shadow screen still contained eleven raw colors, and Home disappeared behind a full-screen error whenever
+the initial profile or streak summary failed. Once Practice and Review are hidden tabs, that error state
+also removes their only primary entry points.
+
+## What the candidate preserves
+
+The combined tab layout keeps the Android font modules, focus remount key, and measured safe-area inset,
+while retaining the five visible destinations and Router 56 selected-state accessibility. Practice and
+Review remain real hidden routes. Compose remains `/compose` after moving into the tab group. Home keeps
+its streak, mastery summary, and speaking hero, with Review first and the full Practice library below.
+
+Shadow's buttons, segmented control, cards, placeholders, and secondary text now consume semantic theme
+tokens. Home no longer removes its navigation when summary data fails: an unavailable due count becomes a
+generic Review action instead of a false zero, while the stable hub remains usable.
+
+## Verification from the combined HEAD
+
+The deterministic route audit printed five visible tabs in the required order, two hidden tabs, fifteen
+unique Practice destinations with no missing route files, an intact clip-player path, no root Compose
+screen, and zero raw hex colors in the promoted/changed tab surfaces. It also confirmed that the Android
+safe-area, platform-symbol-weight, and Router 56 accessibility seams were present. TypeScript and
+whitespace checks exited zero without output, and the online Expo Doctor reported:
+
+```text
+21/21 checks passed. No issues detected!
+```
+
+Fresh production exports from the current HEAD completed for both platforms:
+
+```text
+iOS Bundled 28701ms node_modules/expo-router/entry.js (1654 modules)
+Android Bundled 28714ms node_modules/expo-router/entry.js (1746 modules)
+ios_assets=23 ios_ttf=0
+android_assets=29 android_ttf=3
+```
+
+Both bundles contained the production API URL once and the missing-environment error string zero times.
+The final local Android packaging used JDK 17, SDK 36, `NODE_ENV=production`, and the production API URL:
+
+```text
+BUILD SUCCESSFUL in 19s
+614 actionable tasks: 63 executed, 551 up-to-date
+Performing Streamed Install
+Success
+Status: ok
+LaunchState: COLD
+```
+
+On the Android emulator, a scripted pass opened all five tabs in light mode and again in dark mode; every
+tab reported both `selected=true` and its expected screen. Home opened Review and the existing Practice
+grid. Shadow opened the Clips segment and a clip player, where pressing Play changed the control to Pause.
+No credentials were typed during this pass because the emulator already held an authenticated session.
+
+The generated release artifacts are compile and emulator-test evidence, not store-ready signing evidence.
+The native project still signs release with the debug keystore. iOS native/device behavior, an Android
+physical device, live microphone conversation, audible playback, production signing, and Play Console
+acceptance remain [unverified]. The Home summary-error fallback was statically verified; a forced network
+failure UI pass remains [unverified].
+
+Implementation commits: `a0ba0a2`, `dfba4e5`, and `dd3a7a3`.

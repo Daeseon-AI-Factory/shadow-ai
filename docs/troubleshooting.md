@@ -2530,3 +2530,96 @@ AND 트랙과 합친 뒤의 양 플랫폼 재검증은 [unverified]다. `npm run
 
 **Pattern.** 탭 정보구조를 바꿀 때는 보이는 항목만 교체하지 말고, 내려간 화면의 새 진입점과
 기존 deep link 보존을 한 수용 기준으로 묶어야 한다.
+
+---
+
+## 2026-07-16 — AND 위에 메뉴 재편을 합치면 플랫폼 심볼·safe area·Home 오류 도달성이 다시 깨질 수 있음
+
+**Symptom.** Android 준비 브랜치 위에 메뉴 재편 구현을 적용했을 때 탭 레이아웃이 충돌했다.
+M 쪽의 단일 문자열 `weight="bold"`를 고르면 Android Material Symbols의 실제 bold font 선택이
+사라지고, AND 쪽 파일 전체를 고르면 새 5탭 구조와 Expo Router 56의 `aria-selected` 처리가
+사라지는 형태였다. 승격 대상인 `videos.tsx`에는 raw hex 색상 11곳도 남아 있었다. 또한 Home은
+`me` 또는 `streak` 최초 요청 실패 시 전체 `ErrorState`로 조기 반환해, 탭에서 숨긴 Review와
+Practice 진입점까지 같이 없어졌다.
+
+**Cause (verified).** 양 트랙이 공통으로 수정한 파일은 `docs/troubleshooting.md`, 탭 `_layout.tsx`,
+Home `index.tsx` 세 개였다. 실제 cherry-pick은 `_layout.tsx`의 Speaking 심볼 weight와 EOF 로그
+append에서 충돌했다. Home의 오류 guard와 `videos.tsx`의 11개 raw color는 통합 tree 검색으로
+확인했다.
+
+**Fix.** `codex/and-m-integration`을 AND HEAD에서 분리하고 M 구현과 로그를 순서대로 적용했다.
+탭 레이아웃에는 AND의 측정 safe-area inset, 플랫폼 weight module, focus remount key와 M의
+Home · Shadow · Speaking · Write · Me 순서, 숨은 Practice/Review, Router 56 접근성 상태를 모두
+남겼다. `videos.tsx`의 버튼·segment·카드·보조 텍스트는 `useTheme()` 의미 토큰으로 바꿨다.
+Home은 summary API 오류에도 허브를 렌더하며, due 값을 모를 때 거짓 `0 due` 대신 일반 Review
+CTA와 오류 상태를 표시한다.
+
+최종 정적 감사 출력은 다음과 같다.
+
+```text
+visible=index,videos,sparring,compose,settings
+hidden=practice,review
+practiceCount=15
+missing=[]
+composeRoot=false
+clipPlayerRoute=true
+rawColorCount=0
+homeHubSurvivesSummaryError=true
+```
+
+`./node_modules/.bin/tsc --noEmit --pretty false --incremental false`와 `git diff --check`는 stdout
+없이 exit 0이었다. 온라인 Expo Doctor는 다음을 출력했다.
+
+```text
+Running 21 checks on your project...
+21/21 checks passed. No issues detected!
+```
+
+현재 HEAD의 production export는 양쪽 모두 exit 0이었다.
+
+```text
+iOS Bundled 28701ms node_modules/expo-router/entry.js (1654 modules)
+Android Bundled 28714ms node_modules/expo-router/entry.js (1746 modules)
+ios_assets=23 ios_ttf=0
+android_assets=29 android_ttf=3
+prod_url_matches=1 missing_env_error_matches=0
+```
+
+격리 worktree에서 JDK 17, SDK 36, `NODE_ENV=production`, production API URL을 명시한 최종
+Android 패키징은 다음을 출력했다.
+
+```text
+BUILD SUCCESSFUL in 19s
+614 actionable tasks: 63 executed, 551 up-to-date
+Performing Streamed Install
+Success
+Status: ok
+LaunchState: COLD
+```
+
+최종 APK는 110,166,674 bytes, SHA-256
+`5cc73af549c5d95e2eb83c8d4f95a2c84a2ebe773b9be43ea9683b3c5ae0fb73`이며 `apksigner`는
+`Verifies`와 v2 `true`를 출력했다. AAB는 76,827,468 bytes, SHA-256
+`689ee376e00b6b17cda5e098d772bb9cd76894e1838bf02a75f2821f37e5c98a`이며 ZIP 검사는 오류 0,
+`jarsigner`는 `jar verified`를 출력했다. 생성된 release 설정은 여전히 debug keystore를 사용한다.
+
+최종 APK에서 light와 dark 각각 다섯 탭을 순서대로 눌렀고, 두 번 모두 각 항목이
+`selected=true`, 대응 화면이 `screen=true`였다. Home Review 카드는 `Review`와 `1 / 6`을,
+Practice 타일은 기존 팩 그리드를 열었다. Shadow의 Clips 목록에서 player까지 이동했고 Play
+클릭 뒤 접근성 상태가 `▶ Play`에서 `⏸ Pause`로 바뀌었다. 자격 증명은 입력하지 않았고 기존
+인증 세션을 사용했다.
+
+첫 APK 설치 시 오래 실행된 emulator의 package manager가 응답하지 않아 `install -r`과
+`pm path`가 함께 멈췄다. ADB만 재시작해도 반복됐고 재부팅 뒤에는 `Service package: not found`였다.
+해당 emulator 프로세스를 정상 종료하고 같은 임시 datadir를 wipe 없이 cold boot하자
+`sys.boot_completed=1`, `Service package: found`가 되었고 이후 설치가 성공했다.
+
+iOS native compilation/device interaction, Android physical device, 실제 마이크 대화와 청각적
+오디오 출력, production signing, Play Console acceptance는 [unverified]다. summary API 실패
+상태의 Home 보존은 정적 분기 감사까지 확인했고 실제 네트워크 오류 UI는 [unverified]다.
+
+**Commits.** `a0ba0a2` (M integration), `dfba4e5` (Shadow theme tokens), `dd3a7a3` (Home hub error reachability).
+
+**Pattern.** 독립 트랙의 빌드 성공은 통합 성공이 아니다. 구조 충돌뿐 아니라 플랫폼별 asset
+선택, 승격 화면의 테마 부채, 새 정보구조가 API 오류에서 끊기는 경로까지 같은 통합 수용
+검사로 묶어야 한다.
