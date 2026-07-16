@@ -2419,3 +2419,53 @@ compilation, authenticated Android flows, and Play acceptance remain [unverified
 **Pattern.** A platform-specific asset import in a common React Native module is still a cross-platform
 bundle dependency. Put the import behind Metro's platform-file resolver, then compare exported asset
 manifests for both platforms.
+
+---
+
+## 2026-07-15 — Expo SDK 56 dependency alignment closed Doctor but release bundles still require explicit API env
+
+**Symptom.** The Android production audit stopped at `19/21 checks passed`. Expo Doctor reported that
+`expo-audio`'s `expo-asset` peer was not declared directly and that six Expo packages were behind the SDK
+56 expected patch versions. A fresh native release bundle built after the upgrade, but the first Gradle
+command omitted `EXPO_PUBLIC_API_URL`; `src/lib/api.ts` deliberately throws in a release build when that
+value is absent.
+
+**Cause (verified).** `mobile/package.json` declared Expo 56.0.12, omitted `expo-asset`, and pinned the six
+packages below Doctor's expected patch versions. The EAS production profile contains
+`EXPO_PUBLIC_API_URL=https://api.mimi.daeseon.ai`, but a direct local `gradlew` invocation does not consume
+that EAS profile automatically. The isolated prebuild copy had no `.env*` file, so the first native
+artifact was compile evidence only and not suitable for account testing.
+
+**Fix.** Commit `1cfd379` adds `expo-asset` 56.0.20 and its config plugin, and aligns `@expo/ui` 56.0.22,
+`expo` 56.0.16, `expo-constants` 56.0.21, `expo-linking` 56.0.15, `expo-router` 56.2.15, and
+`expo-splash-screen` 56.0.13. The production URL was then passed explicitly while rerunning
+`:app:createBundleReleaseJsAndAssets`, followed by APK/AAB repackaging.
+
+**Verification.** `npx expo-doctor` printed `21/21 checks passed. No issues detected!`,
+`npx expo install --check` printed `Dependencies are up to date`, and TypeScript printed `tsc_exit=0`.
+Production exports completed with 23 iOS assets and 29 Android assets; only Android retained the three
+Material Symbols TTFs. A fresh prebuild completed and the first native build printed:
+
+```text
+BUILD SUCCESSFUL in 7m 38s
+662 actionable tasks: 652 executed, 10 up-to-date
+```
+
+After the API environment correction, the generated bundle scan printed `prod_url_matches=1` and
+`missing_env_error_matches=0`; repackaging printed `BUILD SUCCESSFUL in 48s`. The final APK is 110,165,698
+bytes with SHA-256 `14231089a9429c7f0777f4dd0c087969c26458779137685b0f1e9c7339a1366b`; `apksigner` printed
+`Verifies` and v2 `true`. The final AAB is 76,828,148 bytes with SHA-256
+`0dd487e55c984c0f713d30227ebf914c42a42a24b0731a5876cb3e33ad16b639`; ZIP integrity reported no errors
+and `jarsigner` printed `jar verified`. Both packaged bundles contained the production API URL exactly
+once. The generated release block still uses the debug keystore, so production-key signing remains a
+separate gate.
+
+`npm audit` reports 11 moderate, zero high, and zero critical findings through the Expo CLI/config →
+`xcode` → `uuid <11.1.1` chain. Its advertised automatic fixes downgrade Expo across major SDK versions,
+so no audit fix was applied; runtime exploitability remains [unverified].
+
+**Commit.** `1cfd379`.
+
+**Pattern.** A successful native release compilation does not prove a usable release artifact when public
+build-time environment variables are mandatory. Scan the packaged JS bundle for the expected public URL,
+not merely the Gradle exit code.

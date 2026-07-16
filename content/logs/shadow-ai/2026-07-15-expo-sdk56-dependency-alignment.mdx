@@ -1,0 +1,83 @@
+---
+title: "Close Expo SDK 56 dependency drift and verify the packaged API target"
+date: "2026-07-15"
+project: "shadow-ai"
+kind: "tech-retro"
+visibility: "public"
+language: "en"
+summary: "Seven Expo dependencies were aligned to SDK 56, Doctor reached 21/21, and fresh Android artifacts were rebuilt with an independently verified production API URL."
+tags: ["expo", "android", "dependencies", "release"]
+---
+
+## The dependency gap
+
+The Android readiness build exposed two related dependency problems. `expo-audio` expected a direct
+`expo-asset` peer, while six Expo packages were behind the patch versions expected by SDK 56. Expo Doctor
+reported 19 of 21 checks passing and warned that the missing peer could fail outside Expo Go.
+
+Commit `1cfd379` makes only the approved alignment:
+
+- `expo-asset` 56.0.20, including its config plugin;
+- `@expo/ui` 56.0.22;
+- `expo` 56.0.16;
+- `expo-constants` 56.0.21;
+- `expo-linking` 56.0.15;
+- `expo-router` 56.2.15;
+- `expo-splash-screen` 56.0.13.
+
+After installation, the direct dependency tree reported exactly those versions. The two static gates then
+closed:
+
+```text
+Running 21 checks on your project...
+21/21 checks passed. No issues detected!
+Dependencies are up to date
+tsc_exit=0
+```
+
+## Cross-platform and native evidence
+
+Fresh production exports completed on both platforms:
+
+```text
+iOS Bundled 35198ms ... (1654 modules), Assets (23)
+Android Bundled 11120ms ... (1746 modules), Assets (29)
+```
+
+iOS still exported no Material Symbols TTFs; Android retained regular, semibold, and bold. A clean Android
+prebuild then autolinked `expo-asset 56.0.20`, and the native APK/AAB build completed:
+
+```text
+BUILD SUCCESSFUL in 7m 38s
+662 actionable tasks: 652 executed, 10 up-to-date
+```
+
+That first native command omitted the EAS profile environment. This matters because the application
+intentionally throws when a release lacks `EXPO_PUBLIC_API_URL`. The isolated build had no `.env*` files,
+so the bundle task was rerun with the production URL explicitly set and the artifacts were repackaged:
+
+```text
+prod_url_matches=1
+missing_env_error_matches=0
+BUILD SUCCESSFUL in 48s
+```
+
+The final debug-signed verification APK is 110,165,698 bytes with SHA-256
+`14231089a9429c7f0777f4dd0c087969c26458779137685b0f1e9c7339a1366b`; Android's verifier reported v2
+signing. The matching AAB is 76,828,148 bytes with SHA-256
+`0dd487e55c984c0f713d30227ebf914c42a42a24b0731a5876cb3e33ad16b639`; ZIP integrity passed. Each packaged
+bundle contains `https://api.mimi.daeseon.ai` exactly once. Production-keystore signing and Play Console
+acceptance remain separate checks.
+
+## Residual audit signal
+
+`npm audit` still reports 11 moderate findings and no high or critical findings. The chain runs through
+Expo's CLI/config tooling into `xcode` and `uuid <11.1.1`; npm's proposed automatic fixes cross major Expo
+SDK versions. No automated downgrade was applied. Whether any finding is reachable in the shipped mobile
+runtime remains unverified.
+
+## Lesson
+
+Dependency alignment needs three independent checks: the package graph, both platform bundles, and the
+actual native artifact. For release builds with mandatory public environment values, add a fourth check:
+inspect the packaged JavaScript for the intended endpoint before installing it on a device.
