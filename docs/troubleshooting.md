@@ -2744,3 +2744,28 @@ manifest에는 차단한 `READ_EXTERNAL_STORAGE`, `WRITE_EXTERNAL_STORAGE`, `SYS
 
 **Pattern.** EAS에 upload keystore가 있다는 사실은 Play App Signing 연결이나 제출 준비 완료를
 의미하지 않는다. 소스 설정, merged manifest, AAB 서명, Console 인증서를 각각 검증해야 한다.
+
+---
+
+## 2026-07-16 — 규격이 맞는 스크린샷도 시각 검수 없이 제출 후보가 될 수 없음
+
+**Symptom.** 네 iPhone 캡처는 모두 1320×2868이었지만 `02-practice.png`는 숨은 Practice
+route에서 Home 하나와 잘린 center-tab bump만 보이는 불완전한 탭바를 담았다.
+`04-import.png`는 큰 빈 blue/top 영역 때문에 store image 구성이 불균형했다.
+
+**Cause (verified).** 파일별 `sips` 조회는 네 장 모두 `pixelWidth: 1320`,
+`pixelHeight: 2868`을 출력했다. 실제 이미지 시각 검수에서는 `01-home.png`와 `03-write.png`의
+현재 5탭 구조는 온전히 보였고, `02-practice.png`와 `04-import.png`에는 위 문제가 보였다.
+해상도 통과는 navigation 완전성이나 구도 품질을 검증하지 않는다.
+
+**Fix.** 이미지는 진단 자료로 보존한다. `mobile/APP_STORE_REVIEW.md`는 Home과 Write만 후보로
+남기고 Practice와 Import를 제출 후보에서 제외했으며, 완전한 navigation과 균형 잡힌 구도로
+재촬영해야 한다고 기록한다.
+
+실제 제출 archive와 동일한 build에서의 재촬영, Shadow의 권리 확인된 캡처, iPad와 한국어
+세트, 오너의 최종 시각 승인은 [unverified]다.
+
+**Commit.** `285d54b77f220cbda2e357f2afa1d75424f0fe2e`.
+
+**Pattern.** App Store pixel 규격 검사는 필요조건이다. 실제 route chrome, 개인정보, 권리,
+카피와 구도는 별도 visual gate로 검수해야 한다.

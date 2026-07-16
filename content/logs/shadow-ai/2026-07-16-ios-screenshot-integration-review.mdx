@@ -1,0 +1,29 @@
+---
+title: "Visual review narrowed the iPhone screenshot candidate set"
+date: "2026-07-16"
+project: "shadow-ai"
+kind: "ux-retro"
+visibility: "public"
+language: "en"
+summary: "All four captures meet Apple's pixel dimensions, but only Home and Write remain visual candidates after integration review."
+tags: ["ios", "app-store", "screenshots", "release", "visual-qa"]
+---
+
+## Pixel size was not the final gate
+
+The four stored iPhone images each report 1320×2868, an accepted 6.9-inch portrait size. Visual inspection
+still found two release-quality failures. The Practice capture enters a hidden route whose screenshot
+shows only Home and a clipped raised-center bump instead of complete navigation. The Import capture has
+a large empty blue/top region and does not make balanced use of the frame.
+
+Home and Write retain the current five-tab navigation and remain source candidates. Practice and Import
+stay in the repository as diagnostic captures, but the review packet now rejects them as submission
+candidates rather than allowing pixel dimensions to imply visual approval.
+
+## Remaining capture work
+
+The final sequence still needs a rights-cleared Shadow image, any desired Practice/Import recaptures,
+iPad assets, optional Korean localization, and recapture from the exact archive selected for submission.
+Owner approval and App Store Connect upload remain [unverified].
+
+Implementation commit: `285d54b77f220cbda2e357f2afa1d75424f0fe2e`.
