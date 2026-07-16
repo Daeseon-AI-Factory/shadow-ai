@@ -314,6 +314,9 @@ Owner input required:
 - Create/validate an App Review demo account with AI access; store credentials only
   in App Store Connect.
 - Enter App Review first name, last name, phone, and email.
+- Confirm whether the support page must also publish a legal address and telephone
+  number for the selected storefronts. The current page publishes an email only;
+  do not invent or commit private contact details.
 - Confirm/publish the App Privacy answers and DSA/trader/account-agreement status.
 - Confirm rights to every video/logo/person visible in screenshots.
 - Capture and approve the new iPhone/iPad screenshots.
