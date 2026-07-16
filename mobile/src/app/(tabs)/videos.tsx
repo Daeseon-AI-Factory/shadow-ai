@@ -35,6 +35,7 @@ function ms(msVal: number) {
 
 export default function VideosScreen() {
   const token = useAuthStore((s) => s.token);
+  const theme = useTheme();
   const qc = useQueryClient();
   const [section, setSection] = useState<LibrarySection>('videos');
   const [clipQuery, setClipQuery] = useState('');
@@ -162,15 +163,17 @@ export default function VideosScreen() {
       <SafeAreaView style={styles.flex} edges={['bottom']}>
         <View style={styles.header}>
           <Pressable
-            style={pressableStyle(styles.importBtn)}
+            style={pressableStyle([styles.importBtn, { backgroundColor: theme.primary }])}
             android_ripple={pressableRipple}
             onPress={() => router.push('/import')}
             accessibilityRole="button"
             accessibilityLabel={t('videos.import')}
           >
-            <ThemedText style={styles.importText}>＋ {t('videos.import')}</ThemedText>
+            <ThemedText style={[styles.importText, { color: theme.onPrimary }]}>
+              ＋ {t('videos.import')}
+            </ThemedText>
           </Pressable>
-          <View style={styles.segment}>
+          <View style={[styles.segment, { borderColor: theme.border }]}>
             <SegmentButton
               label={t('library.videosTab')}
               active={section === 'videos'}
@@ -209,7 +212,10 @@ export default function VideosScreen() {
             }
             renderItem={({ item }) => (
               <Pressable
-                style={pressableStyle(styles.card)}
+                style={pressableStyle([
+                  styles.card,
+                  { backgroundColor: theme.backgroundElement, borderColor: theme.border },
+                ])}
                 android_ripple={pressableRipple}
                 disabled={remove.isPending || feedbackPending}
                 onPress={() => router.push(`/video/${item.video.id}`)}
@@ -220,18 +226,18 @@ export default function VideosScreen() {
                 {item.video.thumbnailUrl ? (
                   <Image source={{ uri: item.video.thumbnailUrl }} style={styles.thumb} />
                 ) : (
-                  <View style={[styles.thumb, styles.thumbPlaceholder]} />
+                  <View style={[styles.thumb, { backgroundColor: theme.backgroundSelected }]} />
                 )}
                 <View style={styles.cardBody}>
                   <ThemedText type="smallBold" numberOfLines={2}>
                     {item.video.title}
                   </ThemedText>
                   {item.video.channelName ? (
-                    <ThemedText type="small" numberOfLines={1} style={styles.muted}>
+                    <ThemedText type="small" numberOfLines={1} style={{ color: theme.textSecondary }}>
                       {item.video.channelName}
                     </ThemedText>
                   ) : null}
-                  <ThemedText type="small" style={styles.muted}>
+                  <ThemedText type="small" style={{ color: theme.textSecondary }}>
                     {t('videos.clipCount', { count: item.clipCount })}
                   </ThemedText>
                 </View>
@@ -262,16 +268,28 @@ function SegmentButton({
   active: boolean;
   onPress: () => void;
 }) {
+  const theme = useTheme();
+
   return (
     <Pressable
-      style={pressableStyle([styles.segmentItem, active && styles.segmentItemOn])}
+      style={pressableStyle([
+        styles.segmentItem,
+        active && { backgroundColor: theme.primary },
+      ])}
       android_ripple={pressableRipple}
       onPress={onPress}
       accessibilityRole="button"
       accessibilityState={{ selected: active }}
       accessibilityLabel={label}
     >
-      <ThemedText style={[styles.segmentText, active && styles.segmentTextOn]}>{label}</ThemedText>
+      <ThemedText
+        style={[
+          styles.segmentText,
+          { color: active ? theme.onPrimary : theme.textSecondary },
+        ]}
+      >
+        {label}
+      </ThemedText>
     </Pressable>
   );
 }
@@ -346,9 +364,14 @@ function ClipsPane({
 }
 
 function ClipRow({ item }: { item: ClipResponse }) {
+  const theme = useTheme();
+
   return (
     <Pressable
-      style={pressableStyle(styles.clipCard)}
+      style={pressableStyle([
+        styles.clipCard,
+        { backgroundColor: theme.backgroundElement, borderColor: theme.border },
+      ])}
       android_ripple={pressableRipple}
       onPress={() => router.push(`/player/${item.id}`)}
       accessibilityRole="button"
@@ -367,7 +390,7 @@ function ClipRow({ item }: { item: ClipResponse }) {
           {item.transcript}
         </ThemedText>
       ) : (
-        <ThemedText type="small" style={styles.muted} numberOfLines={1}>
+        <ThemedText type="small" style={{ color: theme.textSecondary }} numberOfLines={1}>
           {item.videoTitle}
         </ThemedText>
       )}
@@ -380,25 +403,21 @@ const styles = StyleSheet.create({
   mt: { marginTop: 24 },
   header: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8, gap: 12 },
   importBtn: {
-    backgroundColor: '#208AEF',
     borderRadius: 10,
     minHeight: 48,
     paddingVertical: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  importText: { color: '#fff', fontWeight: '700' },
+  importText: { fontWeight: '700' },
   segment: {
     flexDirection: 'row',
     borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#9ca3af',
     overflow: 'hidden',
   },
   segmentItem: { flex: 1, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
-  segmentItemOn: { backgroundColor: '#208AEF' },
-  segmentText: { fontWeight: '800', color: '#6b7280' },
-  segmentTextOn: { color: '#fff' },
+  segmentText: { fontWeight: '800' },
   search: {
     marginHorizontal: 16,
     marginBottom: 8,
@@ -414,20 +433,16 @@ const styles = StyleSheet.create({
     gap: 12,
     borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#9ca3af',
     minHeight: 88,
     padding: 10,
     alignItems: 'center',
   },
-  thumb: { width: 120, height: 68, borderRadius: 8, backgroundColor: '#e5e7eb' },
-  thumbPlaceholder: { backgroundColor: '#d1d5db' },
+  thumb: { width: 120, height: 68, borderRadius: 8 },
   cardBody: { flex: 1, gap: 3 },
-  muted: { color: '#6b7280' },
   empty: { textAlign: 'center', marginTop: 40, paddingHorizontal: 24 },
   clipCard: {
     borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#9ca3af',
     minHeight: 72,
     padding: 14,
     gap: 6,
