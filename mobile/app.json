@@ -66,7 +66,8 @@
           "speechRecognitionPermission": "Allow Mimi to recognize your spoken English so it can check your interview answers."
         }
       ],
-      "expo-image"
+      "expo-image",
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true,
