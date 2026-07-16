@@ -2360,3 +2360,48 @@ Sparring, review, microphone permission, and physical-device behavior also remai
 
 **Pattern.** For Expo symbols on Android, audit both the platform name map and the platform weight module;
 an iOS-valid string weight can silently render as Android regular even when the icon name itself is valid.
+
+---
+
+## 2026-07-15 — Android symbol-weight imports added three Material fonts to the iOS export
+
+**Symptom.** The first production iOS export after the Android weight fix listed these Android-only
+assets:
+
+```text
+node_modules/@expo-google-fonts/material-symbols/400Regular/MaterialSymbols_400Regular.ttf (956KB)
+node_modules/@expo-google-fonts/material-symbols/600SemiBold/MaterialSymbols_600SemiBold.ttf (959KB)
+node_modules/@expo-google-fonts/material-symbols/700Bold/MaterialSymbols_700Bold.ttf (958KB)
+```
+
+Its metadata contained 26 assets and 3 TTF entries.
+
+**Cause (verified).** Eight common TSX files statically imported `expo-symbols/androidWeights/*`. Metro
+therefore followed the font modules while producing the iOS bundle even though iOS `SymbolView` ignores
+the Android half of the platform weight object.
+
+**Fix.** Commit `30db598a8588cba7b0075bed352d1e5a20d4752c` routes all weight imports through
+`mobile/src/lib/symbol-weights.ts`, while `symbol-weights.ios.ts` exports type-compatible inert Android
+values without importing the fonts. Android and web resolve the real font module; iOS resolves the
+platform file.
+
+**Verification.** `tsc_exit=0`. Production exports printed `iOS Bundled ... (1653 modules)` and
+`Android Bundled ... (1744 modules)`. Parsed metadata changed from `before_ios_assets=26` /
+`before_ios_ttf=3` to `after_ios_assets=23` / `after_ios_ttf=0`; Android remained
+`android_asset_count=29` / `android_ttf_count=3`. The current native Android `bundleRelease` printed:
+
+```text
+BUILD SUCCESSFUL in 2m 46s
+607 actionable tasks: 75 executed, 532 up-to-date
+```
+
+Its AAB is 76,823,624 bytes with SHA-256
+`2b39ceb5742e3d52a991dedac42bf76515704241ef54cdfcc6cdddacc651fd63`; ZIP integrity reported no errors
+and `jarsigner` printed `jar verified` with warnings. iOS native compilation and Play acceptance remain
+[unverified].
+
+**Commit.** `30db598a8588cba7b0075bed352d1e5a20d4752c`.
+
+**Pattern.** A platform-specific asset import in a common React Native module is still a cross-platform
+bundle dependency. Put the import behind Metro's platform-file resolver, then compare exported asset
+manifests for both platforms.
