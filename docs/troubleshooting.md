@@ -2623,3 +2623,74 @@ iOS native compilation/device interaction, Android physical device, 실제 마�
 **Pattern.** 독립 트랙의 빌드 성공은 통합 성공이 아니다. 구조 충돌뿐 아니라 플랫폼별 asset
 선택, 승격 화면의 테마 부채, 새 정보구조가 API 오류에서 끊기는 경로까지 같은 통합 수용
 검사로 묶어야 한다.
+
+---
+
+## 2026-07-16 — STORE-iOS 감사에서 최신 메뉴와 제출 바이너리·외부 TestFlight·스토어 메타가 서로 달랐음
+
+**Symptom.** App Store Connect 읽기 전용 조회에서 공개 버전과 최신 처리 빌드는 다음처럼
+서로 다른 세대였다.
+
+```text
+"version": "1.0",
+"state": "READY_FOR_SALE",
+"build": "11",
+"buildState": "VALID"
+
+"build": "22",
+"state": "VALID",
+"uploaded": "2026-07-15T10:54:35-07:00",
+"expired": false
+```
+
+build 22의 TestFlight 상세와 Friends 그룹 조회는 다음을 출력했다.
+
+```text
+"internalBuildState": "IN_BETA_TESTING",
+"externalBuildState": "READY_FOR_BETA_SUBMISSION"
+
+"builds": [
+  { "build": "11", "state": "VALID" },
+  { "build": "9", "state": "VALID" },
+  { "build": "7", "state": "VALID" }
+]
+```
+
+**Cause (verified).** build 22 업로드는 2026-07-15였지만 5탭 메뉴 커밋 `a0ba0a2`의
+커밋 시각은 `2026-07-16T02:24:08-04:00`이었다. 따라서 build 22는 현재 메뉴를 포함할 수
+없다. ASC에는 1.1.0 App Store 버전 레코드가 없었고, HANDOFF가 있다고 적은
+`mobile/APP_STORE_REVIEW.md`와 `app-store-screenshots/`도 Git tracked tree에 없었다. 기존
+지원 페이지는 `Every feature is free to use`라고 했지만 모바일은 AI 대화·채점을
+invite/server entitlement로 제한했고, 개인정보 문서는 실제 OpenAI/Groq 음성 경로를
+누락했다.
+
+**Fix.** `mobile/APP_STORE_REVIEW.md`에 읽기 전용 ASC 스냅샷, 리뷰 노트, 한/영 스토어
+설명·What's New, URL, 권한, App Privacy 대조표, 새 스크린샷 규격과 오너 입력을 정리했다.
+`frontend/app/[locale]/support/page.tsx`는 all-free 단언과 구 메뉴 스크린샷 투어를 제거하고
+현재 Shadowing 탭·AI 접근 모델을 반영했다. `frontend/app/[locale]/privacy/page.tsx`는 실제
+OpenAI/Groq/Gemini/Claude 처리와 마이크 업로드 조건을 반영했다. EAS build/submit,
+TestFlight 그룹 변경, App Review 제출·공개는 실행하지 않았고 `mobile/eas.json`도 수정하지
+않았다.
+
+검증 출력은 다음과 같다.
+
+```text
+support_http=200
+privacy_http=200
+support_new_copy=present
+support_old_all_free=absent
+support_old_screenshot_tour=absent
+privacy_openai=present
+privacy_groq=present
+privacy_microphone=present
+```
+
+Frontend production build는 `✓ Compiled successfully`, `Finished TypeScript`, 148개 static page
+생성을 출력하고 exit 0이었다. ESLint도 exit 0이었지만 기존 `react-hooks/set-state-in-effect`
+경고 13개는 남았다. 동일 베이스 모바일 `npx tsc --noEmit`은 stdout 없이 exit 0이었다.
+
+**Commit.** `c0533cbd6c6cc9d7855c2e1ae7e54611afaa47ec`.
+
+**Pattern.** App Store 준비는 `VALID` 한 줄로 끝나지 않는다. 제출할 Git 커밋 시각,
+App Store 버전의 attached build, TestFlight 외부 그룹 build 목록, 메타데이터 세대를 각각
+읽어서 같은 릴리스인지 대조해야 한다.

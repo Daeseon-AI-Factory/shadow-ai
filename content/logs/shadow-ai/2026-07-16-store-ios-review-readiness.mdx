@@ -1,0 +1,30 @@
+---
+title: "The iOS binary, TestFlight group, and store metadata were three different releases"
+date: "2026-07-16"
+project: "shadow-ai"
+kind: "update"
+visibility: "private"
+language: "en"
+summary: "A read-only App Store Connect audit found that build 22 was valid but predated the current menu, while the public App Store and external TestFlight group still used build 11-era assets. A replacement review packet now separates verified state, owner inputs, and prohibited external actions."
+tags: ["ios", "app-store", "testflight", "release"]
+---
+
+The release surfaces had drifted apart. App Store Connect reported public version 1.0 as
+`READY_FOR_SALE` with build 11. Build 22 was `VALID` and available for internal TestFlight, but its
+external state was only `READY_FOR_BETA_SUBMISSION`; the Friends group still contained builds 11,
+9, and 7. The five-tab Home / Shadowing / Speaking / Write / Me navigation landed the following day,
+so build 22 cannot be the binary for the current menu submission.
+
+The handoff also named `mobile/APP_STORE_REVIEW.md` and an `app-store-screenshots/` directory that did
+not exist in the tracked tree. The available 736×1600 web-support images showed the older four-tab UI
+and visible overlay/corruption, while App Store Connect held a separate accepted set for version 1.0.
+
+Commit `c0533cbd6c6cc9d7855c2e1ae7e54611afaa47ec` adds the missing review packet with copy-ready review
+notes, honest invite-only AI access disclosure, localized metadata drafts, URL and permission notes,
+privacy-label reconciliation, screenshot targets, and owner-only gates. It also corrects the public
+support source's obsolete “every feature is free” claim and updates the privacy source for the actual
+OpenAI/Groq/Gemini/Claude and microphone flows.
+
+No build, upload, TestFlight group mutation, App Review submission, release, or website deployment was
+performed. `mobile/eas.json` was left untouched; the packet contains only a proposed clean-install-safe
+replacement block for its developer-specific local key configuration.
