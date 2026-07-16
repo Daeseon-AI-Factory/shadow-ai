@@ -12,7 +12,13 @@
 
 내부 테스트용 등록 준비는 **조건부**다. 저장소 쪽 production Android 경로는 AAB, internal track, draft release로 명시했지만 다음 항목은 Play Console 또는 새 AAB에서 확인해야 한다.
 
-Dependency 참고: clean install 뒤 `npm audit --omit=dev --json`은 moderate 11, high 0, critical 0을 보고했다. 대부분 Expo config/build tooling과 `uuid` 경로에 연결돼 있으며 production 앱에서 실제로 악용 가능한지는 `[unverified]`다. audit의 제안에는 Expo 46으로의 major downgrade가 포함돼 자동 수정하지 않았다. 별도 dependency triage 후에만 버전을 변경한다.
+Dependency 참고: STORE-AND의 mobile workspace audit은 moderate 11, high 0,
+critical 0을 보고했다. 통합 root에서 `npm ci` 후 다시 실행한
+`npm audit --omit=dev --json`은 moderate 2, high 1, critical 0이었다. high는
+production dependency로 분류된 `shadcn -> @modelcontextprotocol/sdk -> hono@4.12.22`
+경로이고, moderate는 `next@16.2.6 -> postcss@8.4.31` 경로다. 실제 Mimi runtime
+노출 여부는 `[unverified]`다. audit가 제안한 Next 9.3.3 major downgrade를 자동
+적용하지 않았으며 별도 dependency triage 후에만 버전을 변경한다.
 
 출시를 막는 항목:
 
@@ -22,7 +28,8 @@ Dependency 참고: clean install 뒤 `npm audit --omit=dev --json`은 moderate 1
 - AI 기능의 Play AI-generated content 정책 적용 여부와 인앱 신고/플래그 대응이 미확정
 - 앱 없이 계정 삭제를 요청할 웹 경로가 미확정. 현재 support page는 인앱 삭제만 안내하고, 전용 URL `https://mimi.daeseon.ai/en/account-deletion`은 감사 시점에 HTTP 404였음
 - Android 규격으로 캡처된 스크린샷과 1024×500 feature graphic을 저장소에서 찾지 못함. 저장소 밖 자산은 `[unverified]`
-- 현재 소스 HEAD로 만든 production AAB가 없음. 로컬 release merged manifest는 생성·검사했지만 AAB 자체는 `[unverified]`
+- 현재 소스 HEAD의 로컬 APK/AAB는 생성했지만 generated Gradle release가 debug keystore를
+  사용한다. EAS production keystore로 서명된 AAB는 없음
 
 내부 테스트 트랙에만 올리는 동안에도 앱 품질과 정책 위반 가능성이 사라지는 것은 아니다. Data safety 양식은 internal-only 앱에는 면제될 수 있지만, closed/open/production 트랙으로 이동하기 전에 완료해야 한다.
 
@@ -375,15 +382,20 @@ Play developer account 유형과 생성일은 `[unverified]`다. 개인 계정�
 - EAS CLI 20.5.1의 `@expo/eas-json` resolver: `buildType=app-bundle`, `track=internal`, `releaseStatus=draft`
 - JDK 17과 Android SDK를 명시한 `:app:processReleaseMainManifest`: exit 0, target SDK 36
 - merged release manifest 허용 권한: `MODIFY_AUDIO_SETTINGS`, `RECORD_AUDIO`; 차단한 storage/overlay 권한 3개는 없음
+- 통합 HEAD의 `assembleRelease bundleRelease`: exit 0 (`BUILD SUCCESSFUL in 3m 24s`)
+- 로컬 APK: 110,166,622 bytes, SHA-256 `b62983911d2cc73f508ca40b6e5a6143504b6e610ab48490c9923d4912c2ffb0`, APK Signature Scheme v2 검증 통과
+- 로컬 AAB: 76,827,390 bytes, SHA-256 `70c55ea82026b06a6d8718bf044a6565eca1986b6e4ea29ad477c5a6a9985310`, ZIP 오류 0, `jar verified`
+- 두 로컬 산출물은 debug keystore 서명이다. EAS production upload SHA-1과 일치하지 않으므로 Play 업로드 후보가 아니다
 
-### 새 AAB 생성 후 — 이번 작업에서는 실행하지 않음
+### 로컬 debug-signed AAB 확인 결과와 production AAB 게이트
 
-1. AAB package가 `ai.daeseon.mimi`다.
-2. versionCode가 이전 Play artifact보다 크다.
-3. target API가 36 이상이다.
-4. upload certificate SHA-1이 Play Console upload certificate와 같다.
-5. merged manifest 권한이 설명된 allowlist와 같다.
-6. 설치 가능한 Play-generated APK가 production API에 연결된다.
+1. package `ai.daeseon.mimi`, versionName `1.1.0`, target API 36: 로컬 APK 확인
+2. merged manifest 권한 allowlist: 로컬 APK 확인
+3. local versionCode 1이 이전 Play artifact보다 큰지: `[unverified]`
+4. EAS production upload certificate와 Play Console upload certificate 일치: `[unverified]`
+5. production-signed AAB의 package, version, target API, 권한, SHA-1: `[unverified]`
+6. Play-generated APK가 production API에 연결되는지: `[unverified]`
+7. 최종 APK UI 설치·스모크: 실행 중 emulator/기기가 없어 `[unverified]`
 
 ### Play Console 단계 — 오너 작업
 
