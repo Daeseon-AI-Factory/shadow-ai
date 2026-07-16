@@ -309,14 +309,19 @@ Capture rules:
 ### Captured iPhone 6.9-inch candidates (2026-07-16)
 
 The following 1320×2868 PNG files were captured from a local Release simulator
-build of the current source with the repository's screenshot flow enabled. They
-are candidate source assets, not proof of the final submitted binary and not an
-App Store Connect upload:
+build of the current source with the repository's screenshot flow enabled. Visual
+integration review keeps these two as candidate source assets, not proof of the
+final submitted binary and not an App Store Connect upload:
 
 - `store-assets/ios/iphone-6.9/01-home.png`
-- `store-assets/ios/iphone-6.9/02-practice.png`
 - `store-assets/ios/iphone-6.9/03-write.png`
-- `store-assets/ios/iphone-6.9/04-import.png`
+
+These captures are retained for diagnosis but rejected as submission candidates:
+
+- `store-assets/ios/iphone-6.9/02-practice.png`: the hidden Practice route shows an
+  incomplete tab bar with only Home and a clipped center-tab bump.
+- `store-assets/ios/iphone-6.9/04-import.png`: the large empty blue/top region does
+  not present a balanced store image.
 
 The capture display-name override renders `Mimi` on Home. No private email or
 password is visible in these four files. Owner visual approval is still required.
@@ -335,6 +340,8 @@ Still missing:
 
 - One rights-cleared Shadow/video-practice image to complete the recommended
   five-image iPhone sequence.
+- Recaptured Practice and Import images with complete navigation and balanced
+  composition, if those flows are included in the final sequence.
 - All 2064×2752 iPad candidates.
 - A separately approved Korean-localized screenshot set, if one is desired.
 - Recapture from the exact archive/build selected for submission.
