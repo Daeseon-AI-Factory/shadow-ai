@@ -28,3 +28,16 @@ OpenAI/Groq/Gemini/Claude and microphone flows.
 No build, upload, TestFlight group mutation, App Review submission, release, or website deployment was
 performed. `mobile/eas.json` was left untouched; the packet contains only a proposed clean-install-safe
 replacement block for its developer-specific local key configuration.
+
+Later the same day, a local-only iOS simulator pass generated the native project, installed its Pods,
+and compiled both Debug and Release configurations without using EAS. The Release build embedded the
+repository's screenshot-flow flags, replaced the Home display name with `Mimi`, and exercised the
+current Home / Shadow / Speaking / Write / Me navigation on a 1320×2868 simulator.
+
+Commit `e8a1efa4b0ffd939784b94370ff316c7751a518e` tracks four privacy-screened
+iPhone 6.9-inch candidate PNGs under
+`mobile/store-assets/ios/iphone-6.9/`: Home, Practice, Write, and Import. Shadow was excluded because
+the loaded library showed third-party thumbnails and people; Review contained unverified user/video
+content; Me exposed the demo-account email; Speaking did not explain its invitation-controlled access
+on-image. A rights-cleared fifth iPhone image, all iPad captures, optional Korean-localized captures,
+owner visual approval, and recapture from the exact submission archive remain open.
