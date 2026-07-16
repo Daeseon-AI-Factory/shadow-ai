@@ -2769,3 +2769,71 @@ route에서 Home 하나와 잘린 center-tab bump만 보이는 불완전한 탭�
 
 **Pattern.** App Store pixel 규격 검사는 필요조건이다. 실제 route chrome, 개인정보, 권리,
 카피와 구도는 별도 visual gate로 검수해야 한다.
+
+---
+
+## 2026-07-16 — STORE 브랜치 통합은 clean install·native package·서명 경계를 다시 확인해야 함
+
+**Symptom.** STORE-iOS와 STORE-Android를 통합한 첫 frontend lint는 worktree에 의존성이 없어
+다음처럼 실패했다.
+
+```text
+sh: eslint: command not found
+npm error code 127
+```
+
+lockfile clean install은 다음을 출력했고 production-only audit은 별도 실패 상태였다.
+
+```text
+added 765 packages, and audited 769 packages in 2m
+5 vulnerabilities (2 moderate, 3 high)
+
+npm audit --omit=dev --json
+moderate: 2
+high: 1
+critical: 0
+```
+
+**Cause (verified).** 통합 worktree에는 `frontend/node_modules`와 root `node_modules`가 없었다.
+`npm ci` 뒤 `npm ls`는 high advisory 경로를
+`shadcn -> @modelcontextprotocol/sdk -> hono@4.12.22`로, moderate 경로를
+`next@16.2.6 -> postcss@8.4.31`로 출력했다. 자동 audit fix는 Next 9.3.3 major downgrade를
+제안했다. Android generated `build.gradle`은 release에도 `signingConfigs.debug`를 사용했고,
+로컬 APK SHA-1은 EAS production upload SHA-1과 달랐다.
+
+**Fix.** 기존 lockfile을 `npm ci`로 재현하고 dependency 자동 수정은 하지 않았다.
+`docs/android-store-readiness.md`는 mobile-only audit과 통합 root audit을 분리하고, 로컬
+debug-signed 산출물을 production 업로드 후보와 구분했다. `mobile/app.json`의
+`blockedPermissions`는 storage 두 권한과 `SYSTEM_ALERT_WINDOW`를 release manifest에서 제거한다.
+
+통합 HEAD 검증 출력은 다음과 같다.
+
+```text
+visible=index,videos,sparring,compose,settings
+hidden=practice,review
+practiceCount=15
+missing=[]
+mobile tsc exit=0
+frontend lint: 0 errors, 13 warnings, exit=0
+frontend build: 148/148 static pages, exit=0
+iOS Bundled 10676ms (1654 modules)
+Android Bundled 10591ms (1746 modules)
+BUILD SUCCESSFUL in 3m 24s
+662 actionable tasks: 634 executed, 28 up-to-date
+```
+
+최종 APK는 package `ai.daeseon.mimi`, version `1.1.0`, target SDK 36이고 차단 권한 3개가
+없다. 110,166,622 bytes, SHA-256
+`b62983911d2cc73f508ca40b6e5a6143504b6e610ab48490c9923d4912c2ffb0`이며 APK Signature
+Scheme v2 검증을 통과했다. AAB는 76,827,390 bytes, SHA-256
+`70c55ea82026b06a6d8718bf044a6565eca1986b6e4ea29ad477c5a6a9985310`이며 ZIP 오류 0과
+`jar verified`를 출력했다. 두 산출물은 debug keystore 서명이다.
+
+실행 중 Android device가 없어 최종 APK UI 재설치는 [unverified]다. production-signed AAB,
+Play Console, account-deletion web flow, Android store graphics, iOS native archive와 실제 제출도
+[unverified]다.
+
+**Commit.** `574e9691daaa8e29e1a8e523fd3504811a3f5094`.
+
+**Pattern.** 통합 후보의 compile 성공, store upload readiness, production signing은 서로 다른
+검증 수준이다. 같은 결과로 합쳐 표현하지 않는다.
