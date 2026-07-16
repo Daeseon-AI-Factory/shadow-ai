@@ -2348,9 +2348,13 @@ warnings, and offline bundletool validation could not resolve four uncached tran
 acceptance remains [unverified].
 
 The API 34 arm64 emulator reported `device`, boot flag `1`, APK install `Success`, and Mimi cold launch
-`Status: ok`. One later capture showed `Application Not Responding: com.android.systemui`; choosing Wait
-restored the login screen. Successful authentication, shadowing, Sparring, review, microphone permission,
-physical-device behavior, and the System UI ANR cause remain [unverified].
+`Status: ok`. One later capture showed `Application Not Responding: com.android.systemui`; the emulator
+session subsequently exited with `Failed to find ColorBuffer` and `Failed to restore previous context`.
+A software-GPU cold boot completed in 26,101 ms and launched Mimi, but then showed an ANR dialog for
+Digital Wellbeing. After choosing Wait, Mimi remained `topResumedActivity` and the explicit window scan
+printed `anr_window=absent`. `dumpsys activity lastanr` reported no stored ANR and RAM status was normal,
+so the emulator-service dialog cause remains [unverified]. Successful authentication, shadowing,
+Sparring, review, microphone permission, and physical-device behavior also remain [unverified].
 
 **Commit.** `08807010430e28a88a052fb9d2077922ee88d2f0`.
 

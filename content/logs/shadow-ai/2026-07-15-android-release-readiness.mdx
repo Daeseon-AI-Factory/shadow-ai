@@ -94,8 +94,15 @@ Activity: ai.daeseon.mimi/.MainActivity
 
 The login and sign-up surfaces rendered after launch, and an invalid sign-in stayed in Mimi with its
 error state. A later capture showed an Android-owned `Application Not Responding: com.android.systemui`
-dialog; choosing Wait restored the app screen. The cause and repeatability of that System UI event are
-unverified.
+dialog, and that emulator process later exited with `Failed to find ColorBuffer` and
+`Failed to restore previous context`.
+
+The same AVD was then cold-booted with the locally documented `-gpu software` mode. It completed boot in
+26,101 ms and cold-launched Mimi, but displayed a second Android-owned ANR dialog, this time for Digital
+Wellbeing. After choosing Wait, Mimi remained `topResumedActivity` and an explicit window scan printed
+`anr_window=absent`. Android's `dumpsys activity lastanr` reported `<no ANR has occurred since boot>` and
+RAM status was normal. The cause and repeatability of these emulator-service dialogs remain unverified;
+neither dialog named Mimi.
 
 Two release gates remain deliberately open:
 
