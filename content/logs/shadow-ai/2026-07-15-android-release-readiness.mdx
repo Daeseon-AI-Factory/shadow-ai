@@ -1,0 +1,110 @@
+---
+title: "Android release audit: native builds pass, authenticated flows still need evidence"
+date: "2026-07-15"
+project: "shadow-ai"
+kind: "tech-retro"
+visibility: "public"
+language: "en"
+summary: "The first Android native pass fixed platform symbol weights, safe-area handling, portable monospace fonts, and microphone-denial recovery. APK and production AAB artifacts were produced, but Expo dependency checks and authenticated product flows remain open."
+tags: ["android", "expo", "react-native", "release"]
+---
+
+## What the audit found
+
+The app already had an Android package ID, adaptive icon, and recording permission, but that configuration
+had not yet been exercised as a native release. Reading the actual Expo 56 implementation exposed a less
+obvious symbol issue: Android weight selection does not use iOS-style string values. It expects the
+Android font module inside a platform object, and the font-loading effect does not reload when the weight
+changes.
+
+The same pass found four other Android risks in reachable UI code:
+
+- the custom tab bar replaced the navigator's automatic inset with a fixed height and bottom padding;
+- Sparring reserved the bottom safe area but not the top;
+- 12 text styles hard-coded the iOS font family `Menlo`;
+- recording-permission denial had no direct route to system Settings.
+
+Implementation commit `08807010430e28a88a052fb9d2077922ee88d2f0` fixes those source-level issues.
+It imports Expo's regular, semi-bold, and bold Android symbol fonts; remounts tab icons when focused weight
+changes; derives tab-bar padding from `useSafeAreaInsets`; uses the existing `Fonts.mono` platform token;
+and adds the existing translated permission alert to both recording entry points. The transcription mic
+path now also restores non-recording audio mode after stopping.
+
+## Native build evidence
+
+The machine initially used JDK 21. Gradle configuration failed literally with:
+
+```text
+Class org.gradle.jvm.toolchain.JvmVendorSpec does not have member field 'org.gradle.jvm.toolchain.JvmVendorSpec IBM_SEMERU'
+BUILD FAILED in 12s
+```
+
+Running the same generated Android project with JDK 17 and the SDK path produced:
+
+```text
+[ExpoRootProject] Using the following versions:
+  - buildTools:  36.0.0
+  - minSdk:      24
+  - compileSdk:  36
+  - targetSdk:   36
+  - ndk:         27.1.12297006
+BUILD SUCCESSFUL in 5s
+```
+
+The release APK then passed Android signature inspection:
+
+```text
+110160926 bytes
+60f46c0cd26148e63e8aa823b1a77b656ba74cb2626ee687c3133bb351b73158
+Verifies
+Verified using v2 scheme (APK Signature Scheme v2): true
+package: name='ai.daeseon.mimi' versionCode='1' versionName='1.1.0'
+sdkVersion:'24'
+targetSdkVersion:'36'
+uses-permission: name='android.permission.RECORD_AUDIO'
+native-code: 'arm64-v8a' 'armeabi-v7a' 'x86' 'x86_64'
+```
+
+A local EAS production build also produced `/private/tmp/mimi-production-android.aab`. The build output
+reported a remote version-code increment from 1 to 2. Independent file checks found:
+
+```text
+76821106 bytes
+b65531d797916f8b6e7479cd5ac29b4f93889d52fcd8c2256e20d0cb26591bf7
+No errors detected in compressed data of /private/tmp/mimi-production-android.aab.
+```
+
+`jarsigner` printed `jar verified`, but also reported self-signed/timestamp and
+JarFile/JarInputStream warnings. A separate offline `bundletool validate` attempt could not run because
+four transitive artifacts were not cached. This artifact has not been submitted to Play Console.
+
+## Emulator evidence and remaining gates
+
+The API 34 arm64 emulator booted, installed the release APK, and cold-started Mimi:
+
+```text
+emulator-5554  device
+1
+Performing Streamed Install
+Success
+Status: ok
+LaunchState: COLD
+Activity: ai.daeseon.mimi/.MainActivity
+```
+
+The login and sign-up surfaces rendered after launch, and an invalid sign-in stayed in Mimi with its
+error state. A later capture showed an Android-owned `Application Not Responding: com.android.systemui`
+dialog; choosing Wait restored the app screen. The cause and repeatability of that System UI event are
+unverified.
+
+Two release gates remain deliberately open:
+
+1. The Expo dependency check passed 19 of 21 checks. `expo-asset` is not a direct package declaration,
+   and six Expo packages are behind SDK 56's expected patch versions. Dependency changes require owner
+   approval.
+2. No valid test credential was available. Successful login, YouTube shadowing, Sparring, review,
+   microphone permission/recording, and a physical Android device remain unverified.
+
+TypeScript printed `tsc_exit=0`. A static source scan found 31 unique Android symbol names and zero names
+missing from Expo's Android symbol map, but this does not replace the authenticated screen-by-screen
+acceptance test.

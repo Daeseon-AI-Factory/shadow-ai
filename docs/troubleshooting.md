@@ -2295,3 +2295,64 @@ now fully wraps, nothing is clipped, rows stay even. `npx tsc --noEmit` exit 0.
 **Pattern.** A fixed `numberOfLines` on variable-length labels inside a min-height card truncates as soon as
 content grows (extra rows, bigger fonts). For adaptive cards, drop the line cap and let the card grow.
 <!-- skipped: 94f7a1b docs(log): card text truncation fix (0b719df) [no-log] -->
+---
+
+## 2026-07-15 — Android release audit exposed platform weights, fixed insets, and an unclean Expo dependency check
+
+**Symptom.** The first native Gradle configuration under the default JDK 21 stopped before compiling:
+
+```text
+Class org.gradle.jvm.toolchain.JvmVendorSpec does not have member field 'org.gradle.jvm.toolchain.JvmVendorSpec IBM_SEMERU'
+BUILD FAILED in 12s
+```
+
+The repository audit also found `SymbolView` weights passed as plain strings, a fixed-height tab bar that
+did not consume the device bottom inset, `Menlo` in 12 Android-reachable styles, and microphone-denial
+paths that returned without a Settings recovery action. The production build's dependency check was not
+clean; the local package declaration check printed:
+
+```text
+expo-asset MISSING
+@expo/ui ~56.0.18
+expo 56.0.12
+expo-constants ~56.0.16
+expo-linking ~56.0.14
+expo-router ~56.2.11
+expo-splash-screen ~56.0.10
+```
+
+**Cause (verified).** `expo-symbols/src/utils.ts` selects the Android font only from
+`weight.android`; a string weight falls back to regular. Its Android `SymbolView.tsx` loads the font in an
+effect with an empty dependency list, so a focused tab needs a remount when its platform weight changes.
+The tab layout used numeric `height: 74` and `paddingBottom: 12`, while Sparring requested only the bottom
+safe-area edge. The package manifest does not directly declare the `expo-asset` peer required by
+`expo-audio`; dependency/version alignment remains unresolved because adding dependencies requires owner
+approval.
+
+**Fix.** Implementation commit `08807010430e28a88a052fb9d2077922ee88d2f0` uses Expo's Android
+weight modules (and a focus key for tab icons), reserves the measured bottom inset, adds Sparring's top
+safe-area edge, replaces the 12 `Menlo` uses with the existing `Fonts.mono` token, and gives both recorder
+paths an i18n Settings recovery alert. `MicInput` also resets recording audio mode after stop.
+
+**Verification.** `./node_modules/.bin/tsc --noEmit` printed `tsc_exit=0`. The static symbol check found
+16 direct `SymbolView` instances, zero literal names, zero object names missing `android`, 31 unique Android
+names, and zero names missing from Expo's 4,055-entry map. With JDK 17 plus the SDK path, the same Gradle
+configuration printed `BUILD SUCCESSFUL in 5s` and target/compile SDK 36, min SDK 24, NDK 27.1.12297006.
+
+The local release APK is 110,160,926 bytes and `apksigner` printed `Verifies`; `aapt` reported package
+`ai.daeseon.mimi`, version 1.1.0 (code 1), min 24, target 36, RECORD_AUDIO, and four ABIs. The local
+production AAB is 76,821,106 bytes with SHA-256
+`b65531d797916f8b6e7479cd5ac29b4f93889d52fcd8c2256e20d0cb26591bf7`; `unzip -t` reported no compressed
+data errors. `jarsigner` printed `jar verified` but also self-signed/timestamp and JarFile/JarInputStream
+warnings, and offline bundletool validation could not resolve four uncached transitive artifacts, so Play
+acceptance remains [unverified].
+
+The API 34 arm64 emulator reported `device`, boot flag `1`, APK install `Success`, and Mimi cold launch
+`Status: ok`. One later capture showed `Application Not Responding: com.android.systemui`; choosing Wait
+restored the login screen. Successful authentication, shadowing, Sparring, review, microphone permission,
+physical-device behavior, and the System UI ANR cause remain [unverified].
+
+**Commit.** `08807010430e28a88a052fb9d2077922ee88d2f0`.
+
+**Pattern.** For Expo symbols on Android, audit both the platform name map and the platform weight module;
+an iOS-valid string weight can silently render as Android regular even when the icon name itself is valid.
