@@ -1,5 +1,6 @@
 import { Pressable, StyleSheet, View } from 'react-native';
 import { SymbolView } from 'expo-symbols';
+import semiBoldSymbolWeight from 'expo-symbols/androidWeights/semiBold';
 
 import { ThemedText } from './themed-text';
 import { useTheme } from '@/hooks/use-theme';
@@ -17,7 +18,7 @@ export function ErrorState({ message, onRetry }: { message?: string; onRetry?: (
         <SymbolView
           name={{ ios: 'exclamationmark.triangle.fill', android: 'error', web: 'error' }}
           size={28}
-          weight="semibold"
+          weight={{ ios: 'semibold', android: semiBoldSymbolWeight }}
           tintColor="#dc2626"
         />
       </View>

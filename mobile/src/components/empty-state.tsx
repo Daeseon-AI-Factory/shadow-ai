@@ -1,5 +1,6 @@
 import { Pressable, StyleSheet, View } from 'react-native';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
+import semiBoldSymbolWeight from 'expo-symbols/androidWeights/semiBold';
 
 import { ThemedText } from './themed-text';
 import { useTheme } from '@/hooks/use-theme';
@@ -28,7 +29,12 @@ export function EmptyState({
   return (
     <View style={styles.wrap}>
       <View style={[styles.iconWrap, { backgroundColor: theme.primarySoft }]}>
-        <SymbolView name={icon} size={30} weight="semibold" tintColor={theme.primary} />
+        <SymbolView
+          name={icon}
+          size={30}
+          weight={{ ios: 'semibold', android: semiBoldSymbolWeight }}
+          tintColor={theme.primary}
+        />
       </View>
       <ThemedText type="subtitle" style={styles.title}>
         {title}

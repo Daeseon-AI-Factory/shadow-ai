@@ -16,6 +16,7 @@ import { COLLOCATIONS, practiceApi, ApiError } from '@shadow-ai/core';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { Fonts } from '@/constants/theme';
 import { pressableRipple, pressableStyle, useTheme } from '@/hooks/use-theme';
 import { useAuthStore } from '@/lib/auth-store';
 import { t } from '@/lib/i18n';
@@ -93,7 +94,7 @@ export default function ComposeScreen() {
 
             <View style={styles.targetBox}>
               <ThemedText type="small">{t('compose.useThis')}</ThemedText>
-              <ThemedText style={styles.target}>{current.target}</ThemedText>
+              <ThemedText style={[styles.target, { color: theme.primary }]}>{current.target}</ThemedText>
               <ThemedText type="small">{current.gloss}</ThemedText>
             </View>
 
@@ -172,7 +173,7 @@ const styles = StyleSheet.create({
     gap: 4,
     marginTop: 8,
   },
-  target: { fontSize: 22, color: '#208AEF', fontFamily: 'Menlo' },
+  target: { fontSize: 22, fontFamily: Fonts.mono },
   input: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 10,

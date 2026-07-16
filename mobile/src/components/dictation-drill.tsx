@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
+import { Fonts } from '@/constants/theme';
 import { haptic } from '@/lib/haptics';
 import { t } from '@/lib/i18n';
 import { diffWords, splitWords } from '@/lib/word-diff';
@@ -198,7 +199,7 @@ const styles = StyleSheet.create({
   answer: { gap: 6 },
   label: { color: '#6b7280', textTransform: 'uppercase', fontSize: 11 },
   diff: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center' },
-  word: { fontFamily: 'Menlo', fontSize: 14, marginRight: 6, marginBottom: 2 },
+  word: { fontFamily: Fonts.mono, fontSize: 14, marginRight: 6, marginBottom: 2 },
   wordMissed: { color: '#dc2626', textDecorationLine: 'underline' },
   retryBtn: {
     borderRadius: 10,

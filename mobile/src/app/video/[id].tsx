@@ -11,6 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Redirect, router, useLocalSearchParams } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
+import boldSymbolWeight from 'expo-symbols/androidWeights/bold';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import YoutubePlayer, { type YoutubeIframeRef } from 'react-native-youtube-iframe';
 import { ApiError, clipsApi, videosApi, type TranscriptSegment } from '@shadow-ai/core';
@@ -379,7 +380,7 @@ export default function VideoDetailScreen() {
               ? { ios: 'chevron.up', android: 'keyboard_arrow_up', web: 'keyboard_arrow_up' }
               : { ios: 'chevron.down', android: 'keyboard_arrow_down', web: 'keyboard_arrow_down' }}
             size={16}
-            weight="bold"
+            weight={{ ios: 'bold', android: boldSymbolWeight }}
             tintColor="#6b7280"
           />
         </Pressable>

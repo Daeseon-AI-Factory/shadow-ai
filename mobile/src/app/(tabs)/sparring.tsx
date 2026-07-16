@@ -367,7 +367,7 @@ export default function SparringScreen() {
 
   return (
     <ThemedView style={styles.flex}>
-      <SafeAreaView style={styles.flex} edges={['bottom']}>
+      <SafeAreaView style={styles.flex} edges={['top', 'bottom']}>
         {session && sessionAttempt !== null && (
           <WebView
             key={sessionAttempt}

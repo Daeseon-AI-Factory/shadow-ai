@@ -4,6 +4,7 @@ import { useMutation } from '@tanstack/react-query';
 import { practiceApi } from '@shadow-ai/core';
 
 import { ThemedText } from '@/components/themed-text';
+import { Fonts } from '@/constants/theme';
 import { t } from '@/lib/i18n';
 import { diffWords } from '@/lib/word-diff';
 
@@ -117,7 +118,7 @@ const styles = StyleSheet.create({
   label: { color: '#6b7280', textTransform: 'uppercase', fontSize: 11 },
   heard: { fontStyle: 'italic', color: '#6b7280' },
   diff: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center' },
-  word: { fontFamily: 'Menlo', fontSize: 14, marginRight: 6, marginBottom: 2 },
+  word: { fontFamily: Fonts.mono, fontSize: 14, marginRight: 6, marginBottom: 2 },
   wordMissed: { color: '#dc2626', textDecorationLine: 'underline' },
   againBtn: {
     borderRadius: 10,

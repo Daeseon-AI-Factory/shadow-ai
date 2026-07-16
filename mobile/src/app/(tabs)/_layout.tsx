@@ -1,6 +1,9 @@
 import { Pressable, StyleSheet, Text, View, type ColorValue } from 'react-native';
 import { Tabs } from 'expo-router';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
+import boldSymbolWeight from 'expo-symbols/androidWeights/bold';
+import regularSymbolWeight from 'expo-symbols/androidWeights/regular';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useTheme } from '@/hooks/use-theme';
 import { t } from '@/lib/i18n';
@@ -15,12 +18,24 @@ type TabBarButtonProps = {
 
 export default function TabsLayout() {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
+  // Keep the existing 62-point content area, then reserve the real device inset below it.
+  const tabBarBottomInset = Math.max(insets.bottom, 12);
 
   const tabIcon =
     (name: SymbolName) =>
     ({ focused, color }: { focused: boolean; color: ColorValue }) => (
       <View style={[styles.iconShell, focused && { backgroundColor: theme.primarySoft }]}>
-        <SymbolView name={name} size={20} weight={focused ? 'bold' : 'regular'} tintColor={color} />
+        <SymbolView
+          key={focused ? 'bold' : 'regular'}
+          name={name}
+          size={20}
+          weight={{
+            ios: focused ? 'bold' : 'regular',
+            android: focused ? boldSymbolWeight : regularSymbolWeight,
+          }}
+          tintColor={color}
+        />
       </View>
     );
 
@@ -48,8 +63,8 @@ export default function TabsLayout() {
               <SymbolView
                 name={{ ios: 'waveform', android: 'graphic_eq', web: 'graphic_eq' }}
                 size={26}
-                weight="bold"
-                tintColor="#FFFFFF"
+                weight={{ ios: 'bold', android: boldSymbolWeight }}
+                tintColor={theme.onLive}
               />
             </View>
             <Text style={[styles.centerLabel, { color: theme.live }]}>{t('nav.sparring')}</Text>
@@ -71,9 +86,9 @@ export default function TabsLayout() {
         tabBarStyle: {
           backgroundColor: theme.surfaceRaised,
           borderTopColor: theme.border,
-          height: 74,
+          height: 62 + tabBarBottomInset,
           paddingTop: 8,
-          paddingBottom: 12,
+          paddingBottom: tabBarBottomInset,
         },
         tabBarLabelStyle: { fontSize: 11, fontWeight: '700' },
       }}

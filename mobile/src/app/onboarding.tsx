@@ -3,6 +3,7 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
+import boldSymbolWeight from 'expo-symbols/androidWeights/bold';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -53,7 +54,12 @@ export default function OnboardingScreen() {
           {step === 0 && (
             <View style={styles.center}>
               <View style={[styles.hero, { backgroundColor: theme.primarySoft }]}>
-                <SymbolView name={{ ios: 'waveform', android: 'graphic_eq', web: 'graphic_eq' }} size={48} weight="bold" tintColor={theme.primary} />
+                <SymbolView
+                  name={{ ios: 'waveform', android: 'graphic_eq', web: 'graphic_eq' }}
+                  size={48}
+                  weight={{ ios: 'bold', android: boldSymbolWeight }}
+                  tintColor={theme.primary}
+                />
               </View>
               <ThemedText type="title" style={styles.title}>{t('onboard.welcomeTitle')}</ThemedText>
               <ThemedText style={styles.lead} themeColor="textSecondary">{t('onboard.welcomeBody')}</ThemedText>
@@ -130,7 +136,12 @@ function AccessCard({
     <View style={[styles.accessCard, { borderColor: theme.border, backgroundColor: theme.surfaceRaised }]}>
       <View style={styles.accessHead}>
         <View style={[styles.accessIcon, { backgroundColor: iconBackground }]}>
-          <SymbolView name={icon} size={22} weight="bold" tintColor={accent} />
+          <SymbolView
+            name={icon}
+            size={22}
+            weight={{ ios: 'bold', android: boldSymbolWeight }}
+            tintColor={accent}
+          />
         </View>
         <ThemedText type="smallBold" style={{ color: accent }}>{badge}</ThemedText>
       </View>
@@ -145,7 +156,12 @@ function HowRow({ icon, text }: { icon: SymbolName; text: string }) {
   return (
     <View style={styles.howRow}>
       <View style={[styles.howIcon, { backgroundColor: theme.primarySoft }]}>
-        <SymbolView name={icon} size={22} weight="bold" tintColor={theme.primary} />
+        <SymbolView
+          name={icon}
+          size={22}
+          weight={{ ios: 'bold', android: boldSymbolWeight }}
+          tintColor={theme.primary}
+        />
       </View>
       <ThemedText style={styles.howText}>{text}</ThemedText>
     </View>

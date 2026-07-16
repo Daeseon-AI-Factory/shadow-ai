@@ -1,4 +1,5 @@
 import { SymbolView } from 'expo-symbols';
+import boldSymbolWeight from 'expo-symbols/androidWeights/bold';
 import { PropsWithChildren, useState } from 'react';
 import { Pressable, StyleSheet } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
@@ -21,7 +22,7 @@ export function Collapsible({ children, title }: PropsWithChildren & { title: st
           <SymbolView
             name={{ ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }}
             size={14}
-            weight="bold"
+            weight={{ ios: 'bold', android: boldSymbolWeight }}
             tintColor={theme.text}
             style={{ transform: [{ rotate: isOpen ? '-90deg' : '90deg' }] }}
           />

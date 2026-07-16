@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Pressable, StyleSheet, View } from 'react-native';
 import {
   AudioModule,
   RecordingPresets,
@@ -41,7 +41,13 @@ export function LineRecorder({
 
   const start = async () => {
     const perm = await AudioModule.requestRecordingPermissionsAsync();
-    if (!perm.granted) return;
+    if (!perm.granted) {
+      Alert.alert(t('record.micDeniedTitle'), t('record.micDeniedBody'), [
+        { text: t('record.micDeniedCancel'), style: 'cancel' },
+        { text: t('record.micDeniedOpen'), onPress: () => void Linking.openSettings() },
+      ]);
+      return;
+    }
     setBusy(true);
     try {
       await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });

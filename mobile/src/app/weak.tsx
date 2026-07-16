@@ -7,6 +7,7 @@ import { practiceApi, cardIndex, type SrsCard } from '@shadow-ai/core';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { Fonts } from '@/constants/theme';
 import { useAuthStore } from '@/lib/auth-store';
 import { t } from '@/lib/i18n';
 
@@ -74,7 +75,7 @@ export default function WeakSpotsScreen() {
                 </View>
               </View>
               <ThemedText type="small">{item.info.cue}</ThemedText>
-              <ThemedText style={styles.model}>{item.info.model}</ThemedText>
+              <ThemedText style={styles.model} themeColor="primary">{item.info.model}</ThemedText>
             </View>
           )}
         />
@@ -110,5 +111,5 @@ const styles = StyleSheet.create({
   cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   badge: { backgroundColor: '#f59e0b22', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
   badgeText: { fontSize: 11, fontWeight: '700', color: '#b45309' },
-  model: { fontFamily: 'Menlo', color: '#208AEF' },
+  model: { fontFamily: Fonts.mono },
 });

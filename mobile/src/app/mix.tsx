@@ -7,6 +7,7 @@ import { ENGLISH_PATTERNS, PHRASAL_500, IT_TERMS, practiceApi } from '@shadow-ai
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { Fonts } from '@/constants/theme';
 import { useAuthStore } from '@/lib/auth-store';
 import { t } from '@/lib/i18n';
 
@@ -93,7 +94,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     alignItems: 'center',
   },
-  blockText: { fontSize: 18, fontFamily: 'Menlo', textAlign: 'center' },
+  blockText: { fontSize: 18, fontFamily: Fonts.mono, textAlign: 'center' },
   resultBox: {
     borderRadius: 12,
     borderWidth: 1,
@@ -102,7 +103,7 @@ const styles = StyleSheet.create({
     padding: 16,
     gap: 6,
   },
-  sentence: { fontSize: 18, fontFamily: 'Menlo', textAlign: 'center' },
+  sentence: { fontSize: 18, fontFamily: Fonts.mono, textAlign: 'center' },
   gloss: { textAlign: 'center' },
   note: { textAlign: 'center', color: '#b45309' },
   error: { color: '#dc2626', textAlign: 'center' },

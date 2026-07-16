@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Pressable, StyleSheet, View } from 'react-native';
 import { useAudioRecorder, AudioModule, RecordingPresets, setAudioModeAsync } from 'expo-audio';
 import { useMutation } from '@tanstack/react-query';
 import { uploadAsync, FileSystemUploadType } from 'expo-file-system/legacy';
@@ -69,6 +69,10 @@ export function MicInput({ onText }: { onText: (text: string) => void }) {
       const perm = await AudioModule.requestRecordingPermissionsAsync();
       if (!perm.granted) {
         setError(t('mic.denied'));
+        Alert.alert(t('record.micDeniedTitle'), t('record.micDeniedBody'), [
+          { text: t('record.micDeniedCancel'), style: 'cancel' },
+          { text: t('record.micDeniedOpen'), onPress: () => void Linking.openSettings() },
+        ]);
         return;
       }
       await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
@@ -90,6 +94,12 @@ export function MicInput({ onText }: { onText: (text: string) => void }) {
     } catch {
       setError(t('mic.error'));
       return;
+    } finally {
+      try {
+        await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
+      } catch {
+        // A reset failure should not discard a completed take or trap the UI in recording state.
+      }
     }
     if (elapsed < MIN_MS) {
       setError(t('mic.tooShort'));
