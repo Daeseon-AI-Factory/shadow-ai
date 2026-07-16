@@ -2295,6 +2295,7 @@ now fully wraps, nothing is clipped, rows stay even. `npx tsc --noEmit` exit 0.
 **Pattern.** A fixed `numberOfLines` on variable-length labels inside a min-height card truncates as soon as
 content grows (extra rows, bigger fonts). For adaptive cards, drop the line cap and let the card grow.
 <!-- skipped: 94f7a1b docs(log): card text truncation fix (0b719df) [no-log] -->
+
 ---
 
 ## 2026-07-15 — Android release audit exposed platform weights, fixed insets, and an unclean Expo dependency check
@@ -2469,3 +2470,63 @@ so no audit fix was applied; runtime exploitability remains [unverified].
 **Pattern.** A successful native release compilation does not prove a usable release artifact when public
 build-time environment variables are mandatory. Scan the packaged JS bundle for the expected public URL,
 not merely the Gradle exit code.
+
+---
+
+## 2026-07-16 — 세 제품 기둥 중 쉐도잉·영작이 탭바에 없고 복습·연습은 재배치가 필요함
+
+**Symptom.** 구현 전 탭 선언을 같은 parser로 읽으면 다음 구조였다.
+
+```text
+before_visible=index,practice,sparring,review,settings
+before_hidden=videos
+```
+
+`compose`는 루트 Stack 화면이었고, Home에는 My Clips 타일만 있어 탭에서 내릴 Practice와 Review의
+새 허브 진입점이 없었다.
+
+**Cause (verified).** 구현 전 `_layout.tsx`는 `practice`와 `review`를 보이는 탭으로 선언하고
+`videos`만 `href: null`로 숨겼다. `app/compose.tsx`는 `(tabs)` 밖에 있었고, Home의 두 번째 타일은
+`clipsApi.list()` 결과를 표시하며 `/videos`로 이동했다. 이 상태는 구현 커밋의 부모 tree와
+`f8349a3` diff에서 확인했다.
+
+**Fix.** `mobile/src/app/(tabs)/_layout.tsx`를 Home · Shadow · Speaking · Write · Me 순서로
+재배치하고 Practice/Review는 삭제 없이 숨은 라우트로 남겼다. Compose를 `(tabs)`로 이동하면서
+테마 토큰·SafeArea·접근성 버튼 상태를 정리했다. Home은 기존 streak, MasterySummary, Sparring
+hero를 유지하고 최상단 Review CTA와 Practice 타일을 갖도록 바꿨다. 새 탭/홈 문자열은
+`mobile/src/lib/i18n-messages.ts`의 영어·한국어 사전에 함께 추가했다. Expo Router 56이 custom
+tab button에 주는 `aria-selected`를 Speaking 버튼이 소비하도록 해 Android 접근성 tree에서도
+현재 탭을 selected로 노출한다.
+
+검증된 최종 선언은 다음과 같다.
+
+```text
+after_visible=index,videos,sparring,compose,settings
+after_hidden=practice,review
+practice_hrefs=15
+```
+
+`./node_modules/.bin/tsc --noEmit --pretty false --incremental false`와 `git diff --check`는 stdout
+없이 exit 0이었다. 최종 iOS/Android production export도 각각 exit 0이었다.
+
+```text
+iOS Bundled 43644ms node_modules/expo-router/entry.js (1655 modules)
+Android Bundled 44118ms node_modules/expo-router/entry.js (1740 modules)
+BUILD SUCCESSFUL in 24s
+605 actionable tasks: 60 executed, 545 up-to-date
+Performing Streamed Install
+Success
+Status: ok
+LaunchState: COLD
+```
+
+Android 에뮬레이터에서 다섯 탭이 각 화면을 열었고, Home의 Review CTA는 Review 화면을,
+`Practice. All packs` 타일은 Practice 팩 그리드를 열었다. Speaking의 최종 접근성 node는
+`content-desc="Speaking" ... selected="true"`였다. iOS 실기기 탭 터치, dark appearance,
+AND 트랙과 합친 뒤의 양 플랫폼 재검증은 [unverified]다. `npm run lint`는 ESLint 설정이 없어
+검사를 실행하지 않고 자동 설치를 시도했으므로 중단했으며, 자동 package 변경은 제거했다.
+
+**Commit.** `f8349a3f98db2fc19cae468138114b1443f8eacd`.
+
+**Pattern.** 탭 정보구조를 바꿀 때는 보이는 항목만 교체하지 말고, 내려간 화면의 새 진입점과
+기존 deep link 보존을 한 수용 기준으로 묶어야 한다.

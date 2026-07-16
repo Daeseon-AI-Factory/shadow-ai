@@ -1,0 +1,91 @@
+---
+title: "Mimi's tab bar now reflects its three equal learning pillars"
+date: "2026-07-16"
+project: "shadow-ai"
+kind: "ux-retro"
+visibility: "public"
+language: "en"
+summary: "Promoted YouTube shadowing and writing into the primary navigation, kept speaking as the raised center action, and moved review and the full practice library behind clear Home entry points without deleting their routes."
+tags: ["mobile", "navigation", "expo-router", "accessibility"]
+---
+
+## The mismatch
+
+Mimi is meant to have three equal product pillars: YouTube shadowing, live speaking, and writing.
+The old bottom bar did not say that. Its parsed route declarations were:
+
+```text
+before_visible=index,practice,sparring,review,settings
+before_hidden=videos
+```
+
+Shadowing was hidden behind `href: null`, writing lived outside the tab group, and speaking was the only
+pillar visible as a primary destination. Simply swapping labels would have created a second problem:
+removing Practice and Review from the bar without giving them new entry points would make useful existing
+screens hard to reach.
+
+## What changed
+
+The tab order is now Home · Shadow · Speaking · Write · Me. Shadow points to the existing videos and
+clips screen. Speaking keeps its raised coral center control. Compose moved into the tab group and keeps
+the `/compose` URL because Expo Router strips route-group segments from paths. Practice and Review remain
+real screens, but both are hidden from the bar.
+
+Home now owns those two destinations. A large due-count Review card sits directly below the greeting,
+and the existing three-tile row now links to the full Practice library instead of duplicating the new
+Shadow tab with a My Clips tile. The streak card, mastery summary, and speaking hero remain in place.
+
+Moving Compose under a native tab header also exposed a layout edge: it no longer needs to consume the
+top safe-area inset itself. Its colors were moved from raw literals to theme tokens, its monospace face
+uses the shared platform-aware font token, and its action buttons now expose accessible labels.
+
+The custom Speaking button needed one Expo Router 56-specific correction discovered during emulator
+testing. Router 56 passes focus as `aria-selected`; the old button only read `accessibilityState.selected`.
+The route opened, but Android announced the tab as unselected. Reading the installed Router source and
+consuming `aria-selected` fixed the final accessibility node:
+
+```text
+content-desc="Speaking" ... selected="true"
+```
+
+## Verification
+
+The final route parser and practice inventory printed:
+
+```text
+after_visible=index,videos,sparring,compose,settings
+after_hidden=practice,review
+practice_hrefs=15
+```
+
+TypeScript and whitespace checks completed with exit 0 and no stdout. Both production exports completed:
+
+```text
+iOS Bundled 43644ms node_modules/expo-router/entry.js (1655 modules)
+Exported: /private/tmp/shadow-ai-m-menu-ios-export-20260716-r5
+
+Android Bundled 44118ms node_modules/expo-router/entry.js (1740 modules)
+Exported: /private/tmp/shadow-ai-m-menu-android-export-20260716-r5
+```
+
+The current Android release bundle was built, installed, and cold-started:
+
+```text
+BUILD SUCCESSFUL in 24s
+605 actionable tasks: 60 executed, 545 up-to-date
+Performing Streamed Install
+Success
+Status: ok
+LaunchState: COLD
+```
+
+On the Android emulator, all five tab controls opened their matching screens. The Home Review card opened
+the Review flow, and the `Practice. All packs` tile opened the existing Practice grid. No account details
+were entered during this verification; the emulator already held an authenticated app session.
+
+iOS device interaction, dark appearance, and the combined result after the independent AND track is
+merged are [unverified]. `npm run lint` could not run because this branch has no ESLint configuration;
+Expo attempted to bootstrap lint dependencies, so that process was stopped and its package change was
+removed instead of expanding this navigation track's scope.
+
+Implementation commit: `f8349a3f98db2fc19cae468138114b1443f8eacd`.
