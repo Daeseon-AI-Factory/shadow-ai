@@ -1,0 +1,61 @@
+---
+title: "Google Play readiness now has explicit signing and policy gates"
+date: "2026-07-16"
+project: "shadow-ai"
+kind: "tech-retro"
+visibility: "public"
+language: "en"
+summary: "Prepared the Android AAB/internal/draft profiles, removed release-only permission drift, and documented the Play Console work that still requires owner evidence."
+tags: ["android", "google-play", "expo", "release", "privacy"]
+---
+
+## What changed in the repository
+
+The production Android profile now resolves to an app bundle, while the submit profile defaults to the
+internal track with draft release status. These values are guardrails, not permission to upload or
+publish. Keystore and Play service-account filename patterns are excluded from Git.
+
+The app explicitly blocks `READ_EXTERNAL_STORAGE`, `WRITE_EXTERNAL_STORAGE`, and
+`SYSTEM_ALERT_WINDOW`. The first two are not part of Mimi's product flow. The third comes from the
+installed React Native debug manifest and is likewise unnecessary in a production package. Mimi keeps
+only the explicit audio capture and audio-mode permissions required by recording and speaking features.
+
+The new Android readiness packet separates repository evidence from Play Console state. It includes the
+store copy draft, Data safety candidates, App access guidance, account-deletion gap, signing terminology,
+asset requirements, policy questions, and the exact steps that require the account owner.
+
+## Verification evidence
+
+JSON parsing, mobile TypeScript, Expo public config, whitespace checks, and tracked credential-filename
+checks exited zero. EAS CLI 20.5.1 resolved the production profiles as:
+
+```text
+buildType=app-bundle
+track=internal
+releaseStatus=draft
+```
+
+The initial Gradle task without an explicit JDK failed with:
+
+```text
+Class org.gradle.jvm.toolchain.JvmVendorSpec does not have member field 'org.gradle.jvm.toolchain.JvmVendorSpec IBM_SEMERU'
+BUILD FAILED in 6s
+```
+
+Running the same release manifest task with JDK 17, Android SDK, `NODE_ENV=production`, and the production
+API URL exited zero. The generated release manifest reports package `ai.daeseon.mimi`, version code 1,
+target SDK 36, and only `MODIFY_AUDIO_SETTINGS` plus `RECORD_AUDIO` from the reviewed permission set. The
+three blocked storage/overlay permissions are absent.
+
+A read-only EAS credentials screen independently showed a remote JKS build credential and no assigned
+Google service account for Play Store submissions. Public URL checks returned HTTP 200 for Privacy,
+Terms, and Support, but HTTP 404 for the proposed account-deletion route.
+
+## Gates that remain open
+
+No production AAB was built in this store-preparation commit, and nothing was uploaded. Play Console app
+creation, Play App Signing enrollment, upload-certificate comparison, reviewer credentials, final Data
+safety and content-rating answers, Android screenshots, feature graphic, physical-device behavior, and
+the external account-deletion request flow remain [unverified].
+
+Implementation commit: `c9fb5aed7dd5343200a199eb288f00fd6e12b476`.

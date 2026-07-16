@@ -2694,3 +2694,53 @@ Frontend production build는 `✓ Compiled successfully`, `Finished TypeScript`,
 **Pattern.** App Store 준비는 `VALID` 한 줄로 끝나지 않는다. 제출할 Git 커밋 시각,
 App Store 버전의 attached build, TestFlight 외부 그룹 build 목록, 메타데이터 세대를 각각
 읽어서 같은 릴리스인지 대조해야 한다.
+---
+
+## 2026-07-16 — Google Play 준비 설정은 release manifest와 서명 경계를 따로 검증해야 함
+
+**Symptom.** Android store 준비 검토에서 이전 생성 manifest에 앱 기능과 무관한 storage 권한과
+`SYSTEM_ALERT_WINDOW`가 포함될 수 있었고, 기본 JVM 환경의 release manifest task는 다음처럼
+실패했다.
+
+```text
+Class org.gradle.jvm.toolchain.JvmVendorSpec does not have member field 'org.gradle.jvm.toolchain.JvmVendorSpec IBM_SEMERU'
+BUILD FAILED in 6s
+```
+
+**Cause (verified).** 설치된 React Native의
+`mobile/node_modules/react-native/ReactAndroid/src/debug/AndroidManifest.xml`이
+`SYSTEM_ALERT_WINDOW`를 선언한다. 첫 Gradle 호출은 `JAVA_HOME`을 명시하지 않았고, 같은 task에
+JDK 17과 Android SDK를 명시하자 exit 0이었다. Play App Signing과 EAS upload key는 별개이며,
+읽기 전용 EAS credentials 화면에는 remote JKS가 있지만 Play Store submission service account는
+`None assigned yet`로 표시됐다.
+
+**Fix.** `mobile/app.json`은 불필요한 storage 두 권한과 overlay 권한을 `blockedPermissions`로
+제거한다. `mobile/eas.json`은 production Android 산출물을 AAB로, 제출 기본값을 internal/draft로
+제한한다. `mobile/.gitignore`는 keystore와 Play service-account 파일명을 제외하고,
+`docs/android-store-readiness.md`는 owner gate, Data safety 초안, 서명 경계, 자산과 검증 절차를
+기록한다.
+
+로컬 검증 출력은 다음과 같다.
+
+```text
+JSON_PARSE_OK
+{
+  "buildType": "app-bundle",
+  "track": "internal",
+  "releaseStatus": "draft"
+}
+package="ai.daeseon.mimi"
+android:targetSdkVersion="36"
+android.permission.MODIFY_AUDIO_SETTINGS
+android.permission.RECORD_AUDIO
+```
+
+TypeScript, whitespace 검사와 JDK 17 release manifest task는 exit 0이었다. merged release
+manifest에는 차단한 `READ_EXTERNAL_STORAGE`, `WRITE_EXTERNAL_STORAGE`, `SYSTEM_ALERT_WINDOW`가
+없었다. 실제 production AAB, Play Console 등록·인증서 대조, 정책 설문, Android store 자산과
+실기기 검증은 [unverified]다.
+
+**Commit.** `c9fb5aed7dd5343200a199eb288f00fd6e12b476`.
+
+**Pattern.** EAS에 upload keystore가 있다는 사실은 Play App Signing 연결이나 제출 준비 완료를
+의미하지 않는다. 소스 설정, merged manifest, AAB 서명, Console 인증서를 각각 검증해야 한다.
