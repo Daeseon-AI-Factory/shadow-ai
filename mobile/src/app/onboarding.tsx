@@ -3,13 +3,13 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
-import boldSymbolWeight from 'expo-symbols/androidWeights/bold';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useTheme } from '@/hooks/use-theme';
 import { completeOnboarding } from '@/lib/onboarding';
 import { t } from '@/lib/i18n';
+import { boldSymbolWeight } from '@/lib/symbol-weights';
 
 type SymbolName = SymbolViewProps['name'];
 

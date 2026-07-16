@@ -1,9 +1,9 @@
 import { Pressable, StyleSheet, View } from 'react-native';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
-import semiBoldSymbolWeight from 'expo-symbols/androidWeights/semiBold';
 
 import { ThemedText } from './themed-text';
 import { useTheme } from '@/hooks/use-theme';
+import { semiBoldSymbolWeight } from '@/lib/symbol-weights';
 
 type Action = { label: string; onPress: () => void };
 

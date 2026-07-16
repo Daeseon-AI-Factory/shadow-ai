@@ -11,7 +11,6 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Redirect, router, useLocalSearchParams } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import boldSymbolWeight from 'expo-symbols/androidWeights/bold';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import YoutubePlayer, { type YoutubeIframeRef } from 'react-native-youtube-iframe';
 import { ApiError, clipsApi, videosApi, type TranscriptSegment } from '@shadow-ai/core';
@@ -23,6 +22,7 @@ import { LineRecorder } from '@/components/line-recorder';
 import { pressableRipple, pressableStyle } from '@/hooks/use-theme';
 import { useAuthStore } from '@/lib/auth-store';
 import { t } from '@/lib/i18n';
+import { boldSymbolWeight } from '@/lib/symbol-weights';
 
 const ALERT_REOPEN_DELAY_MS = 350;
 type ClipAttempt = {

@@ -1,9 +1,9 @@
 import { Pressable, StyleSheet, View } from 'react-native';
 import { SymbolView } from 'expo-symbols';
-import semiBoldSymbolWeight from 'expo-symbols/androidWeights/semiBold';
 
 import { ThemedText } from './themed-text';
 import { useTheme } from '@/hooks/use-theme';
+import { semiBoldSymbolWeight } from '@/lib/symbol-weights';
 import { t } from '@/lib/i18n';
 
 /**

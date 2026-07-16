@@ -3,7 +3,6 @@ import { ActivityIndicator, AppState, ScrollView, StyleSheet, View } from 'react
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Redirect, router, useFocusEffect } from 'expo-router';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
-import boldSymbolWeight from 'expo-symbols/androidWeights/bold';
 import { useQuery } from '@tanstack/react-query';
 import {
   authApi,
@@ -31,6 +30,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { useAuthStore } from '@/lib/auth-store';
 import { haptic } from '@/lib/haptics';
 import { t } from '@/lib/i18n';
+import { boldSymbolWeight } from '@/lib/symbol-weights';
 
 type SymbolName = SymbolViewProps['name'];
 const SCREENSHOT_DISPLAY_NAME = process.env.EXPO_PUBLIC_SCREENSHOT_DISPLAY_NAME;

@@ -1,12 +1,11 @@
 import { Pressable, StyleSheet, Text, View, type ColorValue } from 'react-native';
 import { Tabs } from 'expo-router';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
-import boldSymbolWeight from 'expo-symbols/androidWeights/bold';
-import regularSymbolWeight from 'expo-symbols/androidWeights/regular';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useTheme } from '@/hooks/use-theme';
 import { t } from '@/lib/i18n';
+import { boldSymbolWeight, regularSymbolWeight } from '@/lib/symbol-weights';
 
 type SymbolName = SymbolViewProps['name'];
 // Minimal shape of the props expo-router hands a custom tabBarButton (avoids depending on
