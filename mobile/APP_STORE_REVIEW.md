@@ -306,6 +306,39 @@ Capture rules:
 - Show the actual five-tab navigation and the same build submitted for review.
 - Check light and dark themes on-device, even if the store set uses one theme.
 
+### Captured iPhone 6.9-inch candidates (2026-07-16)
+
+The following 1320×2868 PNG files were captured from a local Release simulator
+build of the current source with the repository's screenshot flow enabled. They
+are candidate source assets, not proof of the final submitted binary and not an
+App Store Connect upload:
+
+- `store-assets/ios/iphone-6.9/01-home.png`
+- `store-assets/ios/iphone-6.9/02-practice.png`
+- `store-assets/ios/iphone-6.9/03-write.png`
+- `store-assets/ios/iphone-6.9/04-import.png`
+
+The capture display-name override renders `Mimi` on Home. No private email or
+password is visible in these four files. Owner visual approval is still required.
+
+Screens deliberately excluded from the candidate set:
+
+- Shadow: the loaded account library contains third-party thumbnails and people;
+  rights are unverified.
+- Review: the loaded account contains a video title and translated user content;
+  rights are unverified.
+- Me: exposes the demo-account email and original display name.
+- Speaking: shows the invitation-controlled AI flow without explaining the access
+  restriction on the image.
+
+Still missing:
+
+- One rights-cleared Shadow/video-practice image to complete the recommended
+  five-image iPhone sequence.
+- All 2064×2752 iPad candidates.
+- A separately approved Korean-localized screenshot set, if one is desired.
+- Recapture from the exact archive/build selected for submission.
+
 ## 9. Owner-only inputs and external actions
 
 Owner input required:
