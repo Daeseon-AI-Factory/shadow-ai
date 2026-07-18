@@ -2857,3 +2857,48 @@ which will reset in 13 days (on Sat Aug 01 2026).
 **Commit.** `b266e6b`.
 
 **Pattern.** "main에 병합됨"과 "사람이 설치 가능함"은 다른 결승선이고 그 사이에 월 빌드 쿼터가 있다. 아티팩트가 사용자가 여는 표면에 실제로 존재하기 전엔 릴리스를 완료로 보고하지 않는다.
+
+---
+
+## 2026-07-18 — PAY-0: `free/pro` 한 칸으로는 Shadow 유료와 AI 유료를 분리할 수 없음
+
+**Decision input.** 오너가 과금 대상을 다음처럼 확정했다.
+
+```text
+Mimi의 반복·녹음·비교·저장·복습 도구에 대한 사용료다
+```
+
+YouTube 영상 시청권이 아니라 Mimi의 독립적인 훈련 워크플로를 판매한다. 한 앱 안에서
+Free Preview → Shadow → AI로 나누고, 모바일 판매는 Apple/Google IAP를 RevenueCat으로
+연결하며 자체 Spring JWT 사용자 UUID를 유지하는 안을 구현 기본값으로 문서화했다. 정확한
+스토어 가격, Free Preview override, AI 가격·fair-use는 아직 오너/원가 입력이 필요한 값이다.
+
+**Cause (verified).** 현재 DB와 AI gate 검색은 다음을 출력했다.
+
+```text
+7:ALTER TABLE users ADD CONSTRAINT chk_users_plan CHECK (plan IN ('free', 'pro'));
+
+backend/src/main/java/com/tubeshadow/practice/api/PracticeController.java:127:        aiGate.assertEntitled(user.id());
+...
+backend/src/main/java/com/tubeshadow/practice/api/PracticeController.java:225:        aiGate.assertEntitled(user.id());
+```
+
+`aiGate.assertEntitled` 11건은 모두 `PracticeController`에 있었지만, 별도 검색에서는
+`ClipAnalysisService.onClipCreated`와 `ClipAnalysisController.regenerate`가 확인됐다. 따라서
+기존 `plan != free` 판정을 그대로 확장하면 Shadow도 AI를 열고, practice controller만 고치면
+클립 자동/재생성 분석 비용 경계가 남는다.
+
+**Fix.** `docs/MONETIZATION-DESIGN.md`에 두 capability(`SHADOW_ACCESS`, `AI_ACCESS`),
+provider-neutral entitlement 저장소, RevenueCat snapshot/webhook/sync, 자체 JWT UUID identity,
+Free/Shadow/AI 기능표, 만료·복원·계정 전환, AI 비용 가드, YouTube 정책 launch gate,
+PAY-1~PAY-6 순서와 3단계 검증표를 구현 명세로 기록했다. 제품 코드·DB·의존성·스토어 설정은
+수정하지 않았다.
+
+**Verification.** `git diff --cached --check`는 stdout 없이 exit 0이었다. 필수 섹션 검색은
+`PAY-1`부터 `PAY-6`, `DONE_CANDIDATE`, 두 capability와 18개 번호 섹션을 모두 반환했다.
+테스트·빌드·sandbox 구매·실기기 결제는 문서 작업 범위가 아니어서 [unverified]다.
+
+**Commit.** `17702af93e878ca3c267c849738c81bd4f0c5344`.
+
+**Pattern.** 가격제 하나를 문자열 한 칸으로 표현하면 상품 이름과 실제 권한이 결합된다.
+서버는 `free/pro` 라벨이 아니라 비용을 발생시키는 capability를 중앙에서 판정해야 한다.

@@ -1,0 +1,103 @@
+---
+title: "Mimi 유료화 설계 — YouTube가 아니라 훈련 도구를 판다"
+date: "2026-07-18"
+project: "shadow-ai"
+kind: "monetization"
+visibility: "private"
+language: "ko"
+summary: "Free Preview·Shadow·AI의 기능 경계와 RevenueCat IAP, 자체 JWT entitlement 동기화, AI 비용·YouTube 정책 release gate를 개발 가능한 PAY-1~PAY-6 명세로 고정했다."
+tags: ["monetization", "entitlement", "revenuecat", "iap", "mobile"]
+---
+
+## 무엇을 파는가
+
+오너가 유료 상품의 대상을 명확히 했다. Mimi는 YouTube 영상 시청권을 파는 서비스가 아니다.
+사용자가 고른 구간을 반복하고, 자기 목소리를 녹음하고, 원본과 비교하고, 필요한 문장을
+저장하고, 잊기 전에 다시 복습하는 **Mimi의 훈련 워크플로**를 판다.
+
+이 경계에서 앱은 하나만 유지하고 접근 상태를 세 단계로 나눈다.
+
+- **Free Preview:** Mimi 방식의 제한된 가이드 체험
+- **Shadow:** 반복·속도·클립·녹음/A-B·라이브러리·비AI 연습·SRS
+- **AI:** Shadow 전체 + 분석·번역·STT·영작 검사·실시간 스피킹
+
+기존에 생성한 사용자 데이터는 구독이 끝나도 읽기·내보내기·삭제가 가능해야 한다. 이미 만든
+AI 설명도 새 모델 호출을 만들지 않으므로 읽기는 유지하고, 새 생성·재생성·STT·스파링은 AI
+capability가 있어야 한다.
+
+## 왜 기존 `free/pro`를 그대로 쓰지 않는가
+
+현재 마이그레이션은 다음 두 값만 허용한다.
+
+```text
+CHECK (plan IN ('free', 'pro'))
+```
+
+현재 `AiGate`는 effective plan이 free가 아니면 AI를 허용한다. 여기에 `shadow` 문자열만 더하면
+Shadow 사용자도 AI를 모두 쓰게 된다. 더 큰 누락은 AI gate 호출이 practice controller에만
+있고, 클립 생성 시 자동 분석과 `/analysis/regenerate`에는 연결돼 있지 않다는 점이다.
+
+따라서 명세는 상품 라벨 대신 두 business capability를 중앙에서 판정하도록 한다.
+
+```text
+SHADOW_ACCESS
+AI_ACCESS
+```
+
+AI 상품은 두 capability를 모두 부여한다. 모바일 UI의 잠금 표시는 UX이고, 실제 API 허용은
+Spring 백엔드 `AccessPolicy`가 결정한다.
+
+## 결제와 identity
+
+모바일 디지털 기능은 Apple/Google 인앱결제로 판매하고 RevenueCat을 첫 adapter로 사용한다.
+Mimi의 Spring JWT 인증은 유지한다. `/api/auth/me`의 UUID를 RevenueCat Custom App User ID로
+사용하므로 Supabase 이관은 이 직접 연결의 선행조건이 아니다.
+
+RevenueCat webhook event를 곧바로 plan delta로 적용하지 않는다. 인증/HMAC을 확인하고 event를
+idempotent하게 기록한 뒤, RevenueCat의 현재 subscriber snapshot을 다시 조회해 Mimi의
+`user_entitlements`를 동기화한다. 구매·복원 직후에는 JWT로 보호된 `/api/billing/sync`가 같은
+snapshot 동기화를 실행해 webhook 지연만 기다리지 않게 한다.
+
+스토어 SKU와 가격은 앱/백엔드에 하드코딩하지 않는다. `KRW 8,800` Shadow 월간과 연간 월 환산
+5천원대는 가격 가설일 뿐 실제 상품 가격이 아니다. AI 가격과 fair-use 제한은 실제 모델 원가
+증거 전에는 열지 않는다.
+
+## 정책 경계
+
+Apple과 Google의 현재 공식 정책상 앱 안의 디지털 기능 해제는 각 플랫폼 결제 경로를 따라야
+한다. 그래서 모바일에 Lemon Squeezy, Paddle, Stripe, Toss 같은 웹 checkout 링크를 넣지 않는다.
+
+YouTube의 현재 개발자 정책은 embedded player 시청 자체에 비용을 청구하는 것과 YouTube
+application scraping을 별도로 제한한다. 과금 대상을 Mimi 도구로 구분해도, 저장소에 이미
+기록된 비공식 자막 추출 경로의 공개 상용 적합성이 자동 해결되는 것은 아니다. 자막/content
+route는 public paid launch 전에 현재 구현과 당시 공식 약관을 함께 검토해야 한다.
+
+## 개발 순서
+
+전체 명세는 `docs/MONETIZATION-DESIGN.md`에 있다.
+
+1. **PAY-1:** capability DB·AccessPolicy·클립 AI gate 누락
+2. **PAY-2:** RevenueCat provider adapter·webhook·server sync
+3. **PAY-3:** 모바일 SDK·paywall·restore·Settings
+4. **PAY-4:** Apple/Google catalog·sandbox E2E
+5. **PAY-5:** AI 사용량·budget/fair-use guard
+6. **PAY-6:** YouTube policy gate·스토어 메타·릴리스 검증
+
+정확한 가격과 provider credential이 없어도 PAY-1은 시작할 수 있다. 실제 SDK 의존성, DB
+마이그레이션, 외부 provider 호출, store product 생성과 배포는 각각 승인과 후속 검증이 필요하다.
+
+## 검증 경계
+
+문서 커밋 `17702af93e878ca3c267c849738c81bd4f0c5344`에서 whitespace 검사와 필수 섹션 검색은
+통과했다. 제품 코드·DB·의존성은 바꾸지 않았고, 테스트·빌드·sandbox 구매·실기기 결제는
+[unverified]다.
+
+공식 자료는 2026-07-18에 다시 열어 확인했다.
+
+- Apple App Review Guidelines: https://developer.apple.com/app-store/review/guidelines/
+- Google Play Payments: https://support.google.com/googleplay/android-developer/answer/9858738
+- RevenueCat identity: https://www.revenuecat.com/docs/customers/identifying-customers
+- RevenueCat entitlements: https://www.revenuecat.com/docs/getting-started/entitlements
+- RevenueCat webhooks: https://www.revenuecat.com/docs/integrations/webhooks
+- Expo IAP: https://docs.expo.dev/guides/in-app-purchases/
+- YouTube Developer Policies: https://developers.google.com/youtube/terms/developer-policies
