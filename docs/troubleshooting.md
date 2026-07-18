@@ -2837,3 +2837,23 @@ Play Console, account-deletion web flow, Android store graphics, iOS native arch
 
 **Pattern.** 통합 후보의 compile 성공, store upload readiness, production signing은 서로 다른
 검증 수준이다. 같은 결과로 합쳐 표현하지 않는다.
+
+---
+
+## 2026-07-17 — main 10일 stale, 한 달치 작업 미병합; 병합은 성공, TestFlight 컷은 EAS 무료한도로 실패
+
+**Symptom.** "최신 다 main에 합치고 TestFlight 올려서 보게 해줘" 요청. 실제로는 `main`이 `3c10afc`(2026-07-07)로 10일 묵어 있었고 7월 모바일 작업(redesign R1–R4, UX U1–U4, sparring, verbs, android, m-menu)이 ~20개 미병합 브랜치에 흩어져 양방향으로 갈라져 있었음. TestFlight는 권위 조회(`eas build:list`) 결과 여전히 build 18(commit 3c10afc = 옛 main, 7/9). 병합 후 새 빌드 시도가 유료 단계에서 사망:
+
+```
+This account has used its iOS builds from the Free plan this month,
+which will reset in 13 days (on Sat Aug 01 2026).
+    Error: build command failed.
+```
+
+**Cause.** EAS Free 플랜 iOS 클라우드 빌드 월 한도 소진(이번 달 build 17·18로 사용). 리셋 2026-08-01. 코드/게이트 문제 아님 — backend UP·tsc·expo export·next build·EAS auth 전부 통과 후 유료 단계에서만 막힘.
+
+**Fix.** 병합 자체는 성공·검증됨: `codex/and-m-integration`(7/16 통합 tip)을 trial-merge(충돌 0)로 확인 후 main 병합 → `b266e6b`(140파일 +11,891/−1,753), `tsc --noEmit` 0 + `expo export` 정상, `origin/main` 푸시. 롤백점 `backup/main-pre-integration`(3c10afc). 미병합(의도적): track-c/d(rebase 전 중복), redesign-r2(死변형), m-menu(tip에 반영), store-ios/android(제출용). TestFlight 반영은 미완 — 우회: `eas build --local`(크레딧 0) 또는 8/1 리셋 대기.
+
+**Commit.** `b266e6b`.
+
+**Pattern.** "main에 병합됨"과 "사람이 설치 가능함"은 다른 결승선이고 그 사이에 월 빌드 쿼터가 있다. 아티팩트가 사용자가 여는 표면에 실제로 존재하기 전엔 릴리스를 완료로 보고하지 않는다.

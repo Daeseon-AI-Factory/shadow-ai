@@ -1,0 +1,56 @@
+---
+title: "Consolidating a month of scattered branches into main — and hitting the EAS free-tier wall again"
+date: "2026-07-17"
+project: "shadow-ai"
+kind: "troubleshoot"
+visibility: "public"
+language: "en"
+summary: "main had drifted 10 days stale while a month of mobile work lived on ~20 unmerged branches. Verified via the EAS API that TestFlight was still build 18 (= old main), trial-merged the integration tip clean, consolidated it into main, pushed — then the new TestFlight cut died on the EAS free-plan iOS build limit, exactly as it had before."
+tags: ["git", "release", "eas", "testflight", "ios"]
+---
+
+## Symptom
+
+A simple-sounding request — "merge all the latest into main and get it on TestFlight so I can see it" — turned out to rest on a false premise: that a consolidated "latest main" existed at all.
+
+It didn't. `main` was at `3c10afc` (2026-07-07), 10 days stale. The July mobile work (redesign R1–R4, UX U1–U4, realtime sparring, verbs, android readiness, menu restructure) lived on ~20 branches, none merged into `main`. And the branches had **diverged both ways**: `main` carried web/case-study/`/learn` commits the branches lacked, while the branches carried all the mobile work `main` lacked.
+
+## What was actually on TestFlight (verified, not assumed)
+
+Rather than infer from commit logs — which had already burned me once this session (a grep-miss is not proof of absence) — I queried the authoritative source:
+
+```
+eas build:list --platform ios
+→ Build number 18 · Version 1.1.0 · Commit 3c10afc (= main HEAD) · finished 2026-07-09
+→ Build number 17 · Commit 067fb49 · 2026-07-02
+```
+
+So the live TestFlight build was **build 18, cut from the 07-07 main** — missing every bit of the 07-10 → 07-16 work.
+
+## Fix (consolidation — succeeded)
+
+1. Tagged `backup/main-pre-integration` (3c10afc) as a rollback point.
+2. **Trial-merged** `codex/and-m-integration` (the 07-16 integration tip) into a throwaway branch first: **0 conflicts**, 140 files.
+3. Merged it into real `main` → `b266e6b` (140 files, +11,891 / −1,753). Verified the July feature branches are now ancestors of `main`.
+4. Verified the merge didn't break the build: `npx tsc --noEmit` exit 0, and `expo export --platform ios` produced a clean 6.1 MB bundle.
+5. Pushed `3c10afc..b266e6b` to `origin/main`.
+
+Deliberately **not** merged (recorded so nothing is silently dropped): `track-c` / `track-d` (pre-rebase duplicates already represented via `integration/tracks`), `redesign-r2` (dead variant — r1/r3/r4 are in), `m-menu-restructure` (integrated via the tip), `store-ios` / `store-android` (store-submission prep, not app code).
+
+## Where it failed
+
+The TestFlight cut (`npm run release:ios` → `eas build --profile production --auto-submit`) passed every local gate — backend health `UP`, legal URLs, review-risk config, `tsc`, `expo export`, legal-site `next build`, EAS auth — then died at the paid step:
+
+```
+This account has used its iOS builds from the Free plan this month,
+which will reset in 13 days (on Sat Aug 01 2026).
+    Error: build command failed.
+```
+
+`eas build:list` confirms **no build 19 was created**; TestFlight is still build 18. So `main` now has the whole month of work, but the thing a human can install does not.
+
+**Cause.** EAS Free plan caps iOS cloud builds per month; this month's were already spent (builds 17 and 18 in early July). The cap resets 2026-08-01.
+
+**Commit.** `b266e6b` (the consolidation merge). No build artifact — the release was blocked, not completed.
+
+**Pattern.** "Merged to main" and "installable by a human" are different finish lines, and a monthly cloud-build quota sits between them. Ways across without waiting for the reset: a local build (`eas build --local`, or Xcode archive) that spends no cloud credit, or the simulator for a look-only check. Don't report a release as done until the artifact exists at the surface the user actually opens.
