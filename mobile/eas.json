@@ -16,6 +16,9 @@
     },
     "production": {
       "autoIncrement": true,
+      "android": {
+        "buildType": "app-bundle"
+      },
       "env": {
         "EXPO_PUBLIC_API_URL": "https://api.mimi.daeseon.ai"
       }
@@ -23,6 +26,10 @@
   },
   "submit": {
     "production": {
+      "android": {
+        "track": "internal",
+        "releaseStatus": "draft"
+      },
       "ios": {
         "ascApiKeyPath": "/Users/daeseonyoo/.secrets/asc-api-key.p8",
         "ascApiKeyId": "C2H5XN897V",

@@ -1,0 +1,87 @@
+---
+title: "Keep Android symbol fonts out of the iOS bundle"
+date: "2026-07-15"
+project: "shadow-ai"
+kind: "tech-retro"
+visibility: "public"
+language: "en"
+summary: "Android symbol weights rendered correctly, but their static imports silently added three Material Symbols fonts to iOS. A Metro platform-file split preserves Android fonts while removing them from iOS exports."
+tags: ["expo", "ios", "android", "bundle-size"]
+---
+
+## The cross-platform cost behind a correct Android fix
+
+Expo 56 requires Android symbol weights to come from `expo-symbols/androidWeights/*`. Using those modules
+fixed Android's silent regular-weight fallback, but the first production iOS export exposed an unintended
+cost:
+
+```text
+node_modules/@expo-google-fonts/material-symbols/400Regular/MaterialSymbols_400Regular.ttf (956KB)
+node_modules/@expo-google-fonts/material-symbols/600SemiBold/MaterialSymbols_600SemiBold.ttf (959KB)
+node_modules/@expo-google-fonts/material-symbols/700Bold/MaterialSymbols_700Bold.ttf (958KB)
+```
+
+The imports lived in eight common TSX files, including the tab layout, Home, Practice, onboarding, and
+shared empty/error components. Metro followed those imports for iOS even though the iOS native
+`SymbolView` reads only `weight.ios`.
+
+## Platform-file boundary
+
+Commit `30db598a8588cba7b0075bed352d1e5a20d4752c` replaces the eight direct imports with one local module:
+
+- `symbol-weights.ts` exports Expo's actual regular, semi-bold, and bold Android font modules for Android
+  and web;
+- `symbol-weights.ios.ts` exports type-compatible inert values and imports no font assets.
+
+Metro resolves the `.ios.ts` file for iOS and the base `.ts` file for Android/web. TypeScript resolves the
+base module, so every consumer keeps the Android font type instead of weakening it to `any`.
+
+## Evidence from both bundles
+
+Both production exports completed:
+
+```text
+iOS Bundled 28804ms node_modules/expo-router/entry.js (1653 modules)
+Android Bundled 23958ms node_modules/expo-router/entry.js (1744 modules)
+```
+
+Parsing the two export manifests gave an exact before/after comparison:
+
+```text
+before_ios_assets=26
+before_ios_ttf=3
+after_ios_assets=23
+after_ios_ttf=0
+android_asset_count=29
+android_ttf_count=3
+```
+
+The current source also completed a native Android App Bundle build:
+
+```text
+BUILD SUCCESSFUL in 2m 46s
+607 actionable tasks: 75 executed, 532 up-to-date
+```
+
+That AAB is 76,823,624 bytes with SHA-256
+`2b39ceb5742e3d52a991dedac42bf76515704241ef54cdfcc6cdddacc651fd63`. ZIP integrity reported no errors;
+`jarsigner` printed `jar verified` with the same warning class already recorded in the Android readiness
+audit. The generated release block uses `signingConfig signingConfigs.debug`, so this is a current-source
+native verification bundle, not a production-signing or Play Console check.
+
+The matching APK is 110,161,198 bytes with SHA-256
+`91ad0f3e8b8f199522e21f63cb09cf58d11354c64ba9edce5c668d9b652404e3`. `apksigner` printed `Verifies`
+and confirmed v2 signing. It installed successfully, cold-launched Mimi, and the onboarding capture showed
+the bold Android waveform symbol.
+
+A separate EAS local production build used local version code 2, disabled auto-increment, and loaded the
+stored production keystore. Expo Doctor printed `19/21 checks passed`; the native build later ended with
+exit code 143 and `[ABORT] Received termination signal.` The requested output file was absent afterward,
+so a current-source production-signed AAB, iOS native compilation, and Play Console acceptance remain
+unverified.
+
+## Lesson
+
+In a cross-platform React Native file, a platform-specific value is not automatically a platform-specific
+dependency. If importing the value pulls an asset, put the import itself behind Metro's platform resolver
+and compare the exported asset manifests rather than relying on runtime branches.

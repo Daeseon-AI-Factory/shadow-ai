@@ -9,6 +9,8 @@ import com.tubeshadow.practice.api.dto.InterviewCheckResponse;
 import com.tubeshadow.practice.api.dto.MixResponse;
 import com.tubeshadow.practice.api.dto.MockNextResponse;
 import com.tubeshadow.practice.api.dto.ScenarioFeedback;
+import com.tubeshadow.practice.api.dto.SparringReportRequest;
+import com.tubeshadow.practice.api.dto.SparringReportResponse;
 import com.tubeshadow.practice.api.dto.StoryResponse;
 import com.tubeshadow.practice.prompt.ComposePrompt;
 import com.tubeshadow.practice.prompt.MixPrompt;
@@ -17,10 +19,17 @@ import com.tubeshadow.practice.prompt.InterviewPrompt;
 import com.tubeshadow.practice.prompt.PrecisionPrompt;
 import com.tubeshadow.practice.prompt.MockInterviewPrompt;
 import com.tubeshadow.practice.prompt.ScenarioPrompt;
+import com.tubeshadow.practice.prompt.SparringReportPrompt;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * "영작" check: send the learner's sentence + target to the configured AI provider and parse the
@@ -115,12 +124,15 @@ public class CompositionService {
      * Next interviewer question in the mock-interview loop — an opener on an empty history,
      * otherwise a follow-up digging into the candidate's last answer. One short question per call.
      */
-    public MockNextResponse mockNext(List<MockInterviewPrompt.Turn> history, long seed) {
+    public MockNextResponse mockNext(
+            List<MockInterviewPrompt.Turn> history, long seed, String jobDescription) {
         if (!ai.isConfigured()) {
             throw new BusinessException(HttpStatus.SERVICE_UNAVAILABLE, "AI_NOT_CONFIGURED",
                     "AI가 설정되지 않았습니다 (API 키 필요)");
         }
-        String raw = ai.complete(MockInterviewPrompt.SYSTEM, MockInterviewPrompt.userMessage(history, seed));
+        String raw = ai.complete(
+                MockInterviewPrompt.SYSTEM,
+                MockInterviewPrompt.userMessage(history, seed, jobDescription));
         try {
             JsonNode n = objectMapper.readTree(stripFence(raw));
             String q = n.path("question").asText("");
@@ -129,6 +141,69 @@ public class CompositionService {
         } catch (Exception ex) {
             throw new BusinessException(HttpStatus.BAD_GATEWAY, "MOCK_PARSE_FAILED",
                     "AI 응답 파싱 실패");
+        }
+    }
+
+    /**
+     * Analyze the learner-only transcript posted after a realtime session. This is intentionally
+     * read-only: client-owned card keys are echoed for the app to grade through the existing SRS API.
+     */
+    public SparringReportResponse sparringReport(
+            List<String> userTurns, List<SparringReportRequest.Target> targets) {
+        if (!ai.isConfigured()) {
+            throw new BusinessException(HttpStatus.SERVICE_UNAVAILABLE, "AI_NOT_CONFIGURED",
+                    "AI가 설정되지 않았습니다 (API 키 필요)");
+        }
+
+        Map<String, List<SparringReportRequest.Target>> targetsById = new LinkedHashMap<>();
+        Map<String, String> idByNormalizedLabel = new LinkedHashMap<>();
+        Set<String> cardKeys = new LinkedHashSet<>();
+        List<SparringReportPrompt.Target> promptTargets = new ArrayList<>();
+        for (SparringReportRequest.Target target : targets) {
+            if (!cardKeys.add(target.cardKey())) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "SPARRING_REPORT_TARGETS_INVALID",
+                        "스파링 리포트 타깃 키가 중복되었습니다.");
+            }
+            String normalizedLabel = normalizeTargetLabel(target.label());
+            String id = idByNormalizedLabel.get(normalizedLabel);
+            if (id == null) {
+                id = "t" + (targetsById.size() + 1);
+                idByNormalizedLabel.put(normalizedLabel, id);
+                targetsById.put(id, new ArrayList<>());
+                promptTargets.add(new SparringReportPrompt.Target(id, target.label(), target.ko()));
+            }
+            targetsById.get(id).add(target);
+        }
+
+        String raw = ai.complete(
+                SparringReportPrompt.SYSTEM,
+                SparringReportPrompt.userMessage(userTurns, promptTargets),
+                800);
+        try {
+            JsonNode root = objectMapper.readTree(stripFence(raw));
+            List<String> usedIds = requiredStringArray(root, "usedTargets");
+            List<String> missedIds = requiredStringArray(root, "missedTargets");
+            validateTargetPartition(targetsById.keySet(), usedIds, missedIds);
+
+            List<SparringReportResponse.Correction> corrections = requiredCorrections(root);
+            List<String> recurringMistakes = requiredStringArray(root, "recurringMistakes");
+            Set<String> used = Set.copyOf(usedIds);
+            Set<String> missed = Set.copyOf(missedIds);
+
+            List<SparringReportResponse.Target> usedTargets = targetsById.entrySet().stream()
+                    .filter(entry -> used.contains(entry.getKey()))
+                    .flatMap(entry -> entry.getValue().stream())
+                    .map(CompositionService::responseTarget)
+                    .toList();
+            List<SparringReportResponse.Target> missedTargets = targetsById.entrySet().stream()
+                    .filter(entry -> missed.contains(entry.getKey()))
+                    .flatMap(entry -> entry.getValue().stream())
+                    .map(CompositionService::responseTarget)
+                    .toList();
+            return new SparringReportResponse(usedTargets, missedTargets, corrections, recurringMistakes);
+        } catch (Exception ex) {
+            throw new BusinessException(HttpStatus.BAD_GATEWAY, "SPARRING_REPORT_PARSE_FAILED",
+                    "스파링 리포트 응답 파싱 실패");
         }
     }
 
@@ -177,6 +252,61 @@ public class CompositionService {
         } catch (Exception ex) {
             throw new BusinessException(HttpStatus.BAD_GATEWAY, "STORY_PARSE_FAILED",
                     "AI 응답 파싱 실패");
+        }
+    }
+
+    private static SparringReportResponse.Target responseTarget(SparringReportRequest.Target target) {
+        return new SparringReportResponse.Target(target.cardKey(), target.label(), target.ko());
+    }
+
+    private static String normalizeTargetLabel(String label) {
+        return label.strip().toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
+    }
+
+    private static List<String> requiredStringArray(JsonNode root, String field) {
+        JsonNode array = root.get(field);
+        if (array == null || !array.isArray()) {
+            throw new IllegalArgumentException("missing array: " + field);
+        }
+        List<String> values = new ArrayList<>();
+        Set<String> unique = new LinkedHashSet<>();
+        for (JsonNode value : array) {
+            if (!value.isTextual() || value.asText().isBlank() || !unique.add(value.asText())) {
+                throw new IllegalArgumentException("invalid value in: " + field);
+            }
+            values.add(value.asText());
+        }
+        return List.copyOf(values);
+    }
+
+    private static List<SparringReportResponse.Correction> requiredCorrections(JsonNode root) {
+        JsonNode array = root.get("corrections");
+        if (array == null || !array.isArray()) {
+            throw new IllegalArgumentException("missing corrections array");
+        }
+        List<SparringReportResponse.Correction> corrections = new ArrayList<>();
+        for (JsonNode value : array) {
+            String original = value.path("original").asText("");
+            String corrected = value.path("corrected").asText("");
+            if (!value.isObject() || original.isBlank() || corrected.isBlank()) {
+                throw new IllegalArgumentException("invalid correction");
+            }
+            corrections.add(new SparringReportResponse.Correction(
+                    original, corrected, value.path("explanation").asText("")));
+        }
+        return List.copyOf(corrections);
+    }
+
+    private static void validateTargetPartition(
+            Set<String> expectedIds, List<String> usedIds, List<String> missedIds) {
+        Set<String> classified = new LinkedHashSet<>(usedIds);
+        for (String missedId : missedIds) {
+            if (!classified.add(missedId)) {
+                throw new IllegalArgumentException("target classified twice: " + missedId);
+            }
+        }
+        if (!classified.equals(expectedIds)) {
+            throw new IllegalArgumentException("target partition does not match request");
         }
     }
 

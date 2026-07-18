@@ -1,0 +1,35 @@
+---
+title: "스파링 연결에 끝을 만들다 — 12초 상한, 취소, 복구 문구"
+date: "2026-07-13"
+project: "shadow-ai"
+kind: "ux-retro"
+visibility: "public"
+language: "ko"
+summary: "Realtime mint 또는 WebView 연결이 끝나지 않던 경로에 12초 상한과 Cancel을 추가했다. 내부 오류 원문은 로그에만 남기고 화면은 재시도 가능한 한국어·영어 안내로 통일했다."
+tags: ["sparring", "reliability", "expo", "ux"]
+---
+
+## 문제
+
+스파링은 API가 세션을 mint한 뒤 숨은 WebView가 `connected`를 보내야 시작된다. 변경 전에는
+이 둘을 합친 연결 단계에 상한이 없어서, WebView가 응답하지 않으면 사용자가
+`Connecting…` 화면을 빠져나올 수 없었다. API와 WebView의 오류 문자열도 그대로 노출됐다.
+
+## 변경
+
+- 연결 시작부터 **12초 상한**을 적용하고, 성공·실패·취소 시 타이머를 정리한다.
+- 연결 화면에 **Cancel**을 두고 WebView를 정지한 뒤 idle로 복귀한다.
+- 시도 ID를 증가시켜 취소 뒤 늦게 도착한 mint 응답과 이미 mount된 WebView의 `connected` 메시지가 화면을 다시 살리지 못하게 한다.
+- WebView를 시도 ID로 keying하고 load/message/error callback도 현재 시도와 일치할 때만 처리한다.
+- timer ref를 두고 성공·취소·오류에서 동기적으로 해제해 정확히 12초 경계의 경쟁도 닫는다.
+- mint, WebView load, bridge 오류 원문은 개발 로그에 남기고 화면에는 지역화된 복구 문구만 쓴다.
+
+## 검증 범위
+
+`cd mobile && npx tsc --noEmit`과 `git diff --check`는 exit 0이었다. iPhone 17 Pro
+(iOS 26.5) 시뮬레이터에서는 mint 뒤 `connected`를 보내지 않는 local mock으로 no-message
+경로를 재현했다. Cancel은 즉시 idle로 돌아왔고, 재시도는 12초 상한 뒤 친절한 timeout
+문구를 표시했다. 정상 `connected` mock은 live→report까지 진행했다. 실제 WebView 프로세스
+kill은 실행하지 않았고 결정적인 hang 경로를 mock으로 대체했다.
+
+구현 커밋: `abfe172`; 후속 경합 방어: `f9ef2c4`.

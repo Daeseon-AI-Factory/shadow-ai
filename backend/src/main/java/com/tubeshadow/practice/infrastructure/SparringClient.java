@@ -12,9 +12,12 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Mints short-lived OpenAI Realtime client secrets for voice sparring sessions.
@@ -41,6 +44,30 @@ public class SparringClient {
 
     public boolean isConfigured() {
         return props.apiKey() != null && !props.apiKey().isBlank();
+    }
+
+    /** Emails allowed to mint a (paid) realtime session, normalized. Empty = deny everyone. */
+    private Set<String> allowedEmails() {
+        String raw = props.allowedEmails();
+        if (raw == null || raw.isBlank()) {
+            return Set.of();
+        }
+        return Arrays.stream(raw.split(","))
+                .map(s -> s.trim().toLowerCase())
+                .filter(s -> !s.isEmpty())
+                .collect(Collectors.toUnmodifiableSet());
+    }
+
+    /**
+     * Gate the paid feature. DENY-BY-DEFAULT: with no allowlist configured, nobody may mint a
+     * session — so opening the app to the public can't quietly run up the OpenAI bill.
+     */
+    public void assertAllowed(String email) {
+        Set<String> allowed = allowedEmails();
+        if (allowed.isEmpty() || email == null || !allowed.contains(email.trim().toLowerCase())) {
+            throw new BusinessException(HttpStatus.FORBIDDEN, "SPARRING_NOT_ALLOWED",
+                    "실시간 스파링은 현재 지정된 사용자만 이용할 수 있습니다.");
+        }
     }
 
     /** Mint an ephemeral session secret; returns [clientSecret, model]. */

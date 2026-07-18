@@ -1261,3 +1261,1579 @@ The SRS itself was fine: `drill-runner.tsx` already calls `practiceApi.grade(key
 
 <!-- override-trigger: 79e8f9a docs(log): realtime voice sparring v1 — WebView bridge decision (048c02e) [no-log] — false positive: this commit IS the log pair for feature commit 048c02e (troubleshooting entry + mdx narrative, both included in it); the keyword "decision" is in the log title, not an unlogged change -->
 <!-- skipped: dc1c646 chore(log): mark 79e8f9a as log-pair commit, trigger false positive [no-log] -->
+<!-- skipped: d03bf8a chore(log): hook skip marker for dc1c646 [no-log] -->
+
+---
+
+## 2026-07-09 — NCP → Vultr 이관/폐기: "다 껐다"의 함정 3종
+
+**Symptom (돈이 계속 나감).** `terraform destroy`로 MiMi NCP 박스를 지운 뒤 "NCP 전부 종료"라고 보고했으나, 대시보드 청구가 계속 올라갔다(월 추정 12,320원). 계정 API로 훑으니 별도 서버가 남아있었다:
+```
+SERVERS: 1
+  - beside-app running
+BLOCK_STORAGES: 1
+  - beside-app 10737418240
+PUBLIC_IPS: 1
+  - 101.79.22.156
+```
+
+**Cause (검증됨).** `terraform destroy`는 **해당 terraform state에 있는 리소스만** 지운다. beside는 mimi terraform 밖의 별도 배포라 그대로 남아 과금됐다. "계정이 0인지"는 terraform이 아니라 **계정 단위 API 조회**로만 확인 가능.
+
+**Fix (실제 파일/명령).** NCP API(`/vserver/v2/*`, HMAC-SHA256 v2 서명, 키는 `~/.secrets/api-keys.env`의 `NCLOUD_ACCESS_KEY/SECRET_KEY`)로 계정 전체를 조회: `getServerInstanceList` / `getBlockStorageInstanceList` / `getPublicIpInstanceList` / `getCloudPostgresqlInstanceList` + Object Storage는 S3(`aws --endpoint-url https://kr.object.ncloudstorage.com s3 ls`). 최종 확인: 서버 0 / 스토리지 0 / IP 0 / 관리형PG 0 / 버킷 0.
+
+**Commit.** (이 로그 커밋)
+
+**Pattern.** 멀티프로젝트/멀티툴이 얹힌 클라우드 계정에서 "다 지웠다"는 **반드시 계정 단위 리스트로 증명**한다. 관리 도구(terraform) 하나의 성공은 계정 전체를 대변하지 않는다.
+
+---
+
+## 2026-07-09 — 마운트된 NCP 블록 스토리지는 서버 정지 전엔 삭제 불가
+
+**Symptom.**
+```
+Status: 400 Bad Request ... "returnCode": "3001008",
+"returnMessage": "1 storage returns failed. mimi-data(141595000) :
+ The storage is mounted on the server. Please unmount the storage and try again."
+```
+`terraform destroy`가 block_storage를 server보다 먼저 반납하려다 실패. 공인 IP를 이미 반납한 뒤라 SSH 언마운트도 불가.
+
+**Cause (검증됨).** NCP는 실행 중 서버에 attach된 블록 스토리지를 반납하지 못하게 막는다. block_storage → server 의존성 때문에 terraform은 destroy 시 스토리지를 먼저 지우려 하고, 서버가 살아있어 거부당한다.
+
+**Fix.** NCP API `stopServerInstances`로 **서버를 먼저 정지** → `getServerInstanceList`로 `stopped(NSTOP)` 확인 → `terraform destroy -auto-approve` 재실행. 그러면 storage→server 순으로 정상 삭제. (별도 서버는 `stopServerInstances` → `returnServerInstances`.)
+
+**Pattern.** 클라우드 자원 삭제 순서: **compute 정지 → attached storage 반납 → server 반납 → 네트워크/IP**. 파괴적 명령이 의존성 역순으로 꼬이면 targeted가 아니라 "상태를 바꾸는 선행 조치(정지)"부터.
+
+---
+
+## 2026-07-09 — 이관 시 JWT_SECRET 재생성 → 전 세션 무효화 → "로그인창 느림"
+
+**Symptom.** 앱을 켜면 한참 있다가 로그인창이 뜬다(체감 지연).
+
+**Cause (검증됨).** 새 Vultr 백엔드 `.env`에 JWT_SECRET을 **새로 생성**했더니 앱에 저장된 옛 토큰(옛 서명키 서명)이 401로 거부됨. `_layout.tsx` 부팅 흐름: 저장 토큰으로 hydrate → 홈 첫 쿼리 → 401 → `setUnauthorizedHandler`가 `signOut()`+`/login`. 그 서버 왕복(캐나다↔서울 ~0.5s)이 지연으로 보임. 서버 응답 자체는 ~0.5s로 정상(박스 부하 낮음).
+
+**Fix.** 사용자 재로그인 1회 → 새 서명키 토큰 발급 → 이후 부팅은 홈 직행. 비번은 bcrypt라 JWT_SECRET과 무관하게 유효. **세션 연속성을 원하면 이관 시 JWT_SECRET을 보존**할 것.
+
+**Pattern.** 백엔드 이관 체크리스트에 "서명/암호화 시크릿 보존 여부"를 명시. 새로 만들면 전 사용자 강제 로그아웃이 부작용으로 따라온다.
+
+<!-- skipped: 4e26edf docs(log): NCP→Vultr 이관·폐기 회고 — 계정단위 확인/마운트순서/JWT세션 무효화 -->
+<!-- skipped: 90fac58 chore(log): mark 4e26edf as log-pair commit [no-log] -->
+
+---
+
+## 2026-07-10 — [장애] 앱 전면 다운: 공유 Caddyfile에서 라우팅 블록이 사라짐 (동시작업 충돌)
+
+**Symptom.** 폰 앱이 백엔드에 못 붙음. api.mimi 로컬 curl 5회 전부:
+```
+try1: HTTP 000 tls=0.000000s total=0.478018s
+...
+error="Get \"https://api.mimi.daeseon.ai/api/health\": remote error: tls: internal error"  (k6, error_code 1010)
+```
+api.jjan / beside 도 동일하게 HTTP 000. docvault(303)·faangforge(200)만 정상.
+
+**Cause (검증됨).** 백엔드는 정상이었다(`mimi-backend Up 24h (healthy)`), 인증서도 있었다(`/data/caddy/certificates/.../api.mimi.daeseon.ai/{crt,key,json}` 존재). 진짜 원인: **활성 Caddyfile(`/root/ds-forge/deploy/Caddyfile`, ds-forge-caddy-1이 마운트)에서 api.mimi·api.jjan·beside 사이트 블록이 통째로 사라져 있었다** (`grep -in mimi` → 없음, 남은 건 {$DOMAIN}·docvault·docvault-demo뿐). Caddy는 site block이 없는 SNI에 대해 TLS 핸드셰이크를 `internal error`로 끊는다 → curl/k6 000. 이 박스는 여러 프로젝트(mimi·jjan·beside·docvault·faangforge)가 한 Caddy를 공유하는데, **병렬로 돌던 다른 세션이 이 파일을 재정리하며 세 블록을 떨궜다.**
+
+**Fix (실제 파일/명령).** 인증서·업스트림은 멀쩡했으므로 블록만 복원:
+1. 업스트림 도달성 먼저 검증 — `docker exec ds-forge-caddy-1 getent hosts jjan-api` → `172.18.0.8` (jjan-api·jjan-game·beside-web·mimi-backend 전부 caddy 네트워크 `ds-forge_default`에서 해석됨. jjan-api `/`가 404인 건 정상).
+2. `api.mimi` 블록 append + `api.jjan`·`beside` 블록은 원본 `/opt/mimi/Caddyfile`에서 중괄호 균형 맞춰 **verbatim 추출** 후 append (추측 금지). `api-ncp.jjan`은 DNS가 죽은 NCP(223.130.161.55)를 가리켜 **의도적 제외** — 넣으면 ACME 챌린지 실패 → rate limit 위험.
+3. `caddy validate --adapter caddyfile` (→ `Valid configuration`) **후에만** `caddy reload`. 백업: `Caddyfile.bak.mimi-restore.*`, `Caddyfile.bak.canon.*`.
+4. 검증: api.mimi `/api/health` 200·`/sparring.html` 200, api.jjan 404(도달), beside 307(도달), 전 도메인 000 해소.
+
+**Pattern.** 한 Caddy를 여러 프로젝트가 공유하면 **Caddyfile 편집을 한 곳으로 몰거나(단일 정본), 모든 블록을 담은 정본을 베이스로만 재생성**하라. 한 세션의 부분 재작성이 남의 도메인을 조용히 삭제하고, 증상은 "백엔드 멀쩡한데 TLS부터 실패"로 나와 원인이 백엔드가 아니라 **라우팅 config 부재**임을 놓치기 쉽다. 확인 순서: 컨테이너 살아있나 → 인증서 있나 → **활성 config에 그 도메인 블록이 있나**.
+
+<!-- skipped: 910631d docs(log): [장애] 공유 Caddyfile 라우팅 삭제로 앱 다운 — 원인/복구/정본화 회고 -->
+<!-- skipped: 5d8ee39 chore(log): mark 910631d as log-pair commit [no-log] -->
+
+<!-- skipped: 59dc64d test(core): sparring-detect 유닛테스트 (test-only, no behavior change) -->
+<!-- skipped: aaf522b chore(log): mark 59dc64d test-only [no-log] -->
+
+---
+
+## 2026-07-11 — 유료 실시간 스파링 무단 사용 차단 (allowlist, deny-by-default)
+
+**Symptom (사전 방지).** 앱을 일반에 오픈하면 아무 로그인 유저나 `/api/practice/sparring/session`을 호출해 OpenAI Realtime(분당 과금) 세션을 발급받을 수 있었다 — 비용 폭탄 위험.
+
+**Fix.** `SparringClient.assertAllowed(email)` 게이트를 컨트롤러 진입부에 추가. `SPARRING_ALLOWED_EMAILS`(콤마 구분) 허용목록에 없으면 403 `SPARRING_NOT_ALLOWED`. **deny-by-default**: 목록이 비면 아무도 못 쓴다(공개 오픈 시 안전). 배포: 박스에서 이미지 재빌드 → `/opt/mimi-app/.env`에 `SPARRING_ALLOWED_EMAILS=<owner>` → `docker compose up -d`.
+
+**검증.** 랜덤 신규 계정 → `HTTP 403 {"code":"SPARRING_NOT_ALLOWED"}`. 유닛테스트 `SparringPromptTest`: 빈 목록=전원 차단, 목록 지정=대소문자 무시 허용, null 차단. `mimi-backend` healthy, `printenv SPARRING_ALLOWED_EMAILS` 로드 확인.
+
+**Commit.** `bee05f2`
+
+**Pattern.** 분당 과금 외부 API를 감싸는 엔드포인트는 **deny-by-default 허용목록**으로 출시하라. "일단 열고 나중에 잠근다"는 그 사이 청구서로 돌아온다. 허용목록은 재빌드 없이 env 한 줄로 조정 가능하게.
+<!-- skipped: dc4ff40 docs(log): 유료 스파링 allowlist 게이트 (bee05f2) — deny-by-default 비용보호 [no-log] -->
+
+---
+
+## 2026-07-11 — AI 엔드포인트 전체를 단일 허용목록으로 잠금 (AiGate)
+
+**Symptom (사전 방지).** 스파링만 막았더니 채점(compose/scenario/interview, Gemini)·음성전사(Whisper)는 여전히 아무 로그인 유저나 호출 가능 — 공개 오픈 시 잔여 AI 비용/할당량 노출.
+
+**Fix.** `AiGate`(deny-by-default) 컴포넌트 하나 만들어 **모든 AI 엔드포인트**(compose/check·mix·story, scenario/check, interview/mock·check, transcribe, compose/transforms·transform-check, sparring/session)에 `aiGate.assertAllowed(user.email())` 적용. 단일 스위치 `AI_ALLOWED_EMAILS`가 스파링 게이트까지 함께 구동(application.yml의 sparring allowed-emails도 `${AI_ALLOWED_EMAILS}` 참조). **비-AI 기능(YouTube 쉐도잉·드릴·SRS)은 게이트 없음 → 무료 공개.**
+
+**검증 (라이브, 랜덤 신규계정).** compose/check 403, interview/mock 403, sparring 403, **srs(비-AI) 200**. 유닛테스트 `AiGateTest`(빈목록 전원차단 / 대소문자 허용 / null 차단). backend healthy, `printenv AI_ALLOWED_EMAILS` 로드 확인.
+
+**Commit.** `90988de`
+
+**Pattern.** "무료 = 마진 0 기능(정적 콘텐츠·재생·DB), 유료/제한 = 외부 모델 호출"로 경계를 그어라. 게이트는 **엔드포인트마다 개별 호출**이라도 로직은 **한 컴포넌트+한 env**로 모아 스위치를 단일화(추가/제거가 env 한 줄).
+<!-- skipped: b6473fe docs(log): AI 전체 게이트(90988de) — 무료/유료 경계를 비용선에 [no-log] -->
+<!-- skipped: 0336184 chore(log): mark b6473fe log-pair [no-log] -->
+
+---
+
+## 2026-07-12 — 스파링 타깃이 주제를 넘나들어 대화가 어색 → "응집 부분집합" 프롬프트
+
+**Symptom (품질).** 스파링이 오늘 due 카드를 그냥 섞어서 6개 주입 → 한 세션에 운동·코딩 표현이 뒤섞이면 AI가 무관한 것들을 억지로 끼워 넣어 대화가 삐걱.
+
+**Cause (검증됨).** `sparring.tsx`의 타깃 선택이 `shuffle(due)` 후 앞 6개 — **주제 군집이 없다.** 프롬프트는 "6개를 자연스럽게 녹여라"였어서 전부 소화하려다 화제 점프.
+
+**Fix.** `SparringPrompt.build`의 코칭 목표를 **"다 쓰지 마라. 한 대화 흐름에 붙는 것만 3~4개 녹이고 나머지는 남겨라(SRS로 이월). 학습자 화제를 따라가며 거기 맞는 타깃만 유도"**로 교체. 감지·채점은 여전히 전 타깃 대상이라, AI가 안 고른 표현을 학습자가 우연히 써도 채점됨(손해 없음). `SparringPromptTest` 그린, 재배포 후 health 200. 커밋 `cfbd01a`.
+
+**Pattern.** LLM에 "목록 다 소화"를 강제하면 부자연스러운 몰아넣기가 나온다. **"부분집합만 골라 써라 + 나머지는 이월"**이 자연스러움을 산다. 근본 응집은 타깃을 주제로 군집해 주입(팩/그룹 스코프 세션)해야 완성.
+
+<!-- skipped: 774cfcf docs(log): 스파링 응집 부분집합 프롬프트 (cfbd01a) [no-log] -->
+<!-- skipped: fdf5bdc chore(log): mark 774cfcf log-pair [no-log] -->
+
+---
+
+## 2026-07-12 — 스파링 주제 스코프 세션 (근본 응집, ③)
+
+**Fix.** 스파링 시작 화면에 주제 칩(오늘복습/동사/구동사/콜로케이션/개발IT/AI코딩) 추가. `sparring.tsx`의 `candidatePool`을 팩별 함수(`verbsPool`/`phrasalPool`/`collocationsPool`/`itPool`/`aiCodingPool`)로 쪼개고 `TOPICS`+`poolFor(topic)`로 스코프. 타깃 useMemo가 `topic`에 의존 → 고른 팩에서만 due 우선 추출. 긴 표현은 기존 `chunkMatcher` 필터가 자동 제거하므로 팩은 sayable만 남긴다. **클라이언트 전용 — 백엔드/런타임 비용 0** (같은 엔드포인트). `tsc` 0 에러. 커밋 `30524ae`.
+
+**Pattern.** 콘텐츠에 이미 사람이 만든 분류(팩)가 있으면, 그게 곧 "주제 축"이다 — 임베딩 군집 같은 무거운 것 전에 기존 분류로 스코프하면 응집의 8할을 공짜로 얻는다.
+
+<!-- skipped: 3d055e3 docs(log): 스파링 주제 스코프 세션 [no-log] -->
+
+---
+
+## 2026-07-13 — API 요청에 종료 조건이 없어 영구 대기 가능
+
+**Symptom.** 변경 전 공용 API client의 실제 소스에는 caller `signal` 전달만 있고 내부
+timeout이 없었다.
+
+```text
+interface FetchOptions {
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  body?: Body;
+  query?: Record<string, string | number | boolean | undefined>;
+  signal?: AbortSignal;
+}
+...
+const response = await fetch(buildUrl(path, query), {
+  method,
+  headers,
+  body: serialized,
+  signal,
+  cache: "no-store",
+});
+```
+
+**Cause (verified).** `git show efcd7fe^:packages/core/src/api/client.ts`에서 `apiRequest()`가
+이 repo의 공용 `fetch()` choke point이지만 timer나 자체 `AbortController`를 만들지 않는 것을
+확인했다. 따라서 caller가 별도 signal을 주지 않으면 client 쪽 종료 조건이 없었다.
+
+**Fix.** `efcd7fe`: `packages/core/src/api/client.ts`에 일반 요청 15초, `FormData` 요청
+60초 기본값과 선택적 `timeoutMs`를 추가했다. caller abort를 내부 controller로 전달하고,
+내부 timer가 abort한 경우에만 `ApiError(408, "TIMEOUT")`로 바꾼다. timer와 caller listener는
+응답 성공·실패 모두 `finally`에서 제거한다.
+
+**Verified.** loopback 서버에서 정상 응답, 무응답, 15초 초과 `FormData` 응답을 실행했다.
+
+```text
+{"normal":"ok","timeout":{"status":408,"code":"TIMEOUT","elapsedMs":15160},"formData":{"result":"ok","elapsedMs":15758}}
+```
+
+기존 API 회귀 테스트는 `Tests  6 passed (6)`, mobile `npx tsc --noEmit`은 exit 0이었다.
+
+**Known gap.** `mobile/src/components/mic-input.tsx:45`의 legacy `uploadAsync()`는 공용 client를
+우회하며 이번 허용 파일 범위 밖이다. 그 직접 업로드 경로에는 이번 timeout이 적용되지 않는다.
+
+**Commit.** `efcd7fe`
+
+**Pattern.** caller 취소와 내부 deadline을 합성할 때는 누가 abort했는지 별도로 기록해야
+사용자 취소를 timeout으로 오분류하지 않는다.
+
+---
+
+## 2026-07-13 — 저장 토큰을 먼저 노출해 만료 세션이 Home을 거치는 부팅 흐름
+
+**Symptom.** 변경 전 root layout은 SecureStore Promise의 성공 경로만 연결하고, 저장 토큰을
+검증하지 않은 채 곧바로 인증 상태로 hydrate했다.
+
+```text
+loadToken().then((token) => hydrate(token));
+```
+
+keychain 읽기가 reject되면 `hydrated`가 계속 false였고, 만료 토큰은 Home의 인증 쿼리들이
+401을 받은 뒤에야 전역 handler가 로그인으로 보냈다.
+
+**Cause (verified).** `git show ae42b74^:mobile/src/app/_layout.tsx`에서 `loadToken()`에
+reject 경로와 사전 `authApi.me()` 검증이 없음을 확인했다. Home에도 쿼리 오류 분기가 없어
+실패 데이터를 빈 계정으로 해석할 수 있었다.
+
+**Fix.** `ae42b74`: Expo SDK 56 splash를 module scope에서 붙잡고, 저장 토큰이 있으면 UI를
+mount하기 전에 L1 timeout이 적용되는 `authApi.me()`로 한 번 검증한다. 성공 응답은 `['me']`
+cache에 seed하고, 401은 live token과 query cache를 먼저 지운 뒤 Login을 초기 route로 연다.
+SecureStore 읽기 실패도 `hydrate(null)`로 끝내 부팅 대기를 해제한다. 중간 세션 401은 동시
+handler를 하나로 합치고 401 재시도를 생략한다. Home의 첫 쿼리들은 한 번 실패하면 명시적
+retry 화면을 보여 빈 상태 CTA로 오인하지 않게 했다.
+
+**Verified.** 실제 root layout을 mock 경계와 함께 import한 임시 Vitest에서 valid token,
+startup 401 + token 삭제 실패, keychain read 실패의 3경로를 실행했다.
+
+```text
+Test Files  1 passed (1)
+Tests  3 passed (3)
+```
+
+TanStack Query 임시 Vitest에서는 401 무재시도·동시 handler 1회·비인증 오류 3회 재시도를
+실행했다.
+
+```text
+Test Files  1 passed (1)
+Tests  2 passed (2)
+```
+
+최신 L2 커밋 직전 `npx tsc --noEmit`은 exit 0, `git diff --cached --check`도 exit 0이었다.
+
+**Unverified.** release build의 실제 iOS/Android 콜드 스타트에서 splash→Login/Home 시각적
+전환은 실행하지 않았다. timeout·offline처럼 검증 결과가 401이 아닌 경우에는 저장 토큰을
+삭제하지 않고 Home의 retry 화면으로 넘기는 fail-open 정책이다.
+
+**Commit.** `ae42b74`
+
+**Pattern.** 저장 credential을 읽었다는 사실과 서버가 그 credential을 인정한다는 사실을
+분리한다. 검증이 끝날 때까지 native splash를 유지하고, 모든 Promise reject 경로가 반드시
+부팅 상태를 종결하도록 만든다.
+
+---
+
+## 2026-07-13 — 신규 사용자의 무료 학습 경로가 일반 import CTA에서 끊김
+
+**Symptom.** 변경 전 Home은 복습이나 기존 클립이 없으면 맥락 없이 import로만 보냈고,
+온보딩 마지막 단계는 실제 학습 경로 대신 일일 시간 목표를 물었다.
+
+```text
+title: t('today.importCta'),
+sub: t('today.importSub'),
+onPress: () => router.push('/import'),
+...
+<ThemedText type="title" style={styles.title}>{t('onboard.goalTitle')}</ThemedText>
+```
+
+**Cause (verified).** `git show 90f6b9e^`로 Home의 primary action이 review → clip → import 세
+경우뿐이고, 온보딩 3단계가 5/15/30분 목표 선택임을 확인했다. 저장 영상의 transcript 상태를
+읽어 첫 문장 선택으로 이어 주는 분기도 없었다.
+
+**Fix.** `90f6b9e`: `mobile/src/app/onboarding.tsx`를 무료 shadow → 기기 내 dictation → review
+루프와 초대 전용 AI 대화·답안 채점을 구분하는 3단계 안내로 바꿨다. 완료 flag 저장이 실패해도
+Home으로 빠져나온다. `mobile/src/app/(tabs)/index.tsx`는 review → 서버의 최신 clip → transcript가
+READY인 저장 영상 → 자막 영상 import 순으로 하나의 CTA를 고르고, transcript가 없는 저장 영상은
+다른 영상 import로 복구한다. 기기 전역 `lastClip`은 계정 간 섞일 수 있어 Home 판단에서 제외했다.
+`mobile/src/lib/i18n-messages.ts`에 영어·한국어 문구를 함께 추가했다.
+
+**Verified.** 실제 화면 모듈을 import한 임시 Vitest에서 CTA 우선순위, transcript 없는 영상의
+복구, SecureStore reject 시 온보딩 탈출, 보조 query 실패와 cached-data refetch 실패를 실행했다.
+
+```text
+Test Files  1 passed (1)
+Tests  7 passed (7)
+```
+
+mobile `npx tsc --noEmit`은 출력 없이 exit 0이었다. Expo export는 두 플랫폼 모두 완료됐다.
+
+```text
+iOS Bundled 18636ms node_modules/expo-router/entry.js (1289 modules)
+Exported: /private/tmp/track-a-final-rebased-ios-20260713
+Android Bundled 11449ms node_modules/expo-router/entry.js (1726 modules)
+Exported: /private/tmp/track-a-final-rebased-android-20260713
+```
+
+실제 iOS Simulator에서도 앱 내 신규 가입이 온보딩으로 자동 이동하는 것을 확인했다. 별도의 신규
+로컬 계정으로 3단계 온보딩 → Home의 `Start the free learning loop` → 자막 YouTube import → 첫
+문장 clip → 기기 내 dictation 채점까지 진행했고 `12/21 words` 결과가 표시됐다. 이 경로에서는
+invite gate나 dead end가 나타나지 않았다.
+
+**Unverified.** 위 두 실기 검증은 iOS의 `Save Password?` 시스템 대화상자 때문에 하나의 끊김
+없는 신규 가입 run으로 실행하지는 못했다. release build의 전체 first-run과 실제 shadow 녹음,
+review 완료도 확인하지 않았다. import 직후 transcript가 UNAVAILABLE인 화면의 즉시 복구는 이번
+허용 범위 밖이다.
+
+**Known cost gap.** `ClipService`는 clip 저장 뒤 `ClipCreatedEvent`를 발행하고,
+`ClipAnalysisService`는 transcript와 configured provider가 있으면 `aiClient.analyzeClip()`을 호출한다.
+이 경로에는 `AiGate`가 없으므로 “사용자 무료” 경로는 맞지만 “운영비 zero cost”는 현재 코드와
+일치하지 않는다. 백엔드는 다른 트랙 소유라 이번 커밋에서 변경하지 않았다.
+
+**Commit.** `90f6b9e`
+## 2026-07-13 — 스파링 연결이 끝나지 않고 서버 원문 오류가 노출됨
+
+**Symptom (코드 감사).** 변경 전 `mobile/src/app/sparring.tsx`는 mint/WebView 연결의 종료 시점을 제한하지 않았고, 받은 오류 문자열을 그대로 화면 상태에 넣었다.
+
+```tsx
+setError((e as Error).message);
+setError(msg.message ?? 'unknown');
+```
+
+**Cause (검증됨).** 변경 전 연결 단계에는 `setTimeout`과 Cancel 동작이 없었다. mint가 끝난 뒤 WebView의 `connected` 메시지가 오지 않으면 `phase === 'connecting'`이 계속 유지됐고, 늦게 끝난 mint 요청을 무효화하는 시도 식별자도 없었다.
+
+**Fix.** `mobile/src/app/sparring.tsx`에 12,000ms 연결 상한, 명시적 Cancel, 늦은 mint 응답 무효화, WebView load/bridge 오류 처리, 타이머 cleanup을 추가했다. 후속 코드 감사에서는 mint뿐 아니라 이미 mount된 WebView가 취소 뒤 늦게 `connected`를 보낼 수 있는 경로와 정확히 12초 경계의 timer/message 경쟁도 확인했다. WebView를 시도 ID로 keying하고 message/load/error callback이 현재 시도와 일치할 때만 상태를 바꾸며, 성공·취소·오류는 timer ref를 동기적으로 해제한다. 원문은 `[sparring]` 경고 로그로 남기고 사용자에게는 `mobile/src/lib/i18n-messages.ts`의 영어/한국어 복구 문구만 표시한다.
+
+**검증 (함수 + iOS 흐름).** 타입/diff 검사는 exit 0이었다. iPhone 17 Pro(iOS 26.5) 시뮬레이터와 로컬 mock에서 mint는 성공하지만 WebView가 `connected`를 보내지 않는 hang을 만들었다. Cancel은 Connecting에서 즉시 Topic 화면으로 복귀했고, 재시도는 12초 상한 뒤 아래 문구로 복귀했다. `connected` mock은 live→report까지 진행됐다. 실제 WebView 프로세스를 강제 종료한 검증은 아니며, 결정적인 no-message 경로를 mock으로 대체했다.
+
+```text
+$ cd mobile && npx tsc --noEmit
+(no stdout; exit 0)
+$ git diff --check
+(no stdout; exit 0)
+Maestro L5 Cancel: Connecting → Cancel → Topic; COMPLETED
+Maestro L5 timeout: "That took too long. Check your connection and try again."; COMPLETED
+Maestro L5 connect: live hint → End → Session report; COMPLETED
+```
+
+**Commits.** `abfe172`, 후속 경합 방어 `f9ef2c4`
+
+---
+
+## 2026-07-13 — 낮은 box의 미도래 표현을 스파링에서 집중 선택할 수 없음
+
+**Symptom (코드 감사).** 기존 선택기는 미래 예정 카드를 box 숙련도와 무관하게 하나의 `known` 배열로 섞었다. 신규 카드는 타깃 수가 부족할 때만 뒤에서 보충됐다.
+
+```tsx
+(st.dueDate <= today ? due : known).push(c);
+let picked = [...shuffle(due), ...shuffle(known)].slice(0, TARGET_COUNT);
+```
+
+**Cause (검증됨).** `SrsCard`에는 `box`와 `correctCount`가 있지만 선택 로직은 `dueDate`만 분기했다. 생성 시각 필드는 없으므로 실제 "최근 추가 순"은 계산할 수 없다.
+
+**Fix.** `packages/core/src/practice-srs.ts`에 `partitionLearning`을 추가했다. `box <= 1 && dueDate > today`인 카드를 box→정답 횟수→원본 순서로 정렬하고, 상태가 없는 fresh 카드를 별도로 반환한다. `mobile/src/app/sparring.tsx`의 신규 학습 표현 모드는 이 learning 목록을 먼저 쓰고 fresh로 여섯 자리를 채운다. 기존 due 분기는 그대로 유지했다.
+
+**검증 (함수 수준).** 실제 helper import로 경계·정렬·동률·fresh·입력 불변성을 검사했고 모바일 타입 검사도 통과했다.
+
+```text
+partitionLearning checks passed: low-box order, due boundaries, fresh, stable ties, immutability
+$ cd mobile && npx tsc --noEmit
+(no stdout; exit 0)
+Maestro F3 learning: take out/get up visible; overdue put on and box-2 give up hidden; COMPLETED
+Maestro F3 due: overdue put on visible; COMPLETED
+```
+
+**Commit.** `90d9206`
+
+---
+
+## 2026-07-13 — 기본 동사 스파링이 1,956개 풀 전체에서만 타깃을 고름
+
+**Symptom (코드 감사).** 기존 `poolFor`는 상위 토픽만 받아 기본 동사 전체 풀을 반환했다. `put`, `take`, `get` 또는 `up`, `off`, `out`처럼 한 축으로 좁힐 입력이 없었다.
+
+```tsx
+const poolFor = (topic: TopicKey): Candidate[] =>
+  (TOPICS.find((tp) => tp.key === topic) ?? TOPICS[0]).pool();
+```
+
+**Cause (검증됨).** 동사 그룹은 `VERB_PACK`, `verbs.tsx`가 실제 축 picker에 쓰는 파티클/전치사 태그는 `PARTICLE_INFO[key].particle`에 이미 있었지만 스파링 풀과 선택 UI가 이 분류를 사용하지 않았다. 초기 구현은 더 좁은 `PARTICLE_FAMILIES`(25개 adverb family)를 사용해 `verbs.tsx`의 축과 불일치했다. 실제 데이터 감사 결과 기본 동사 원본은 1,956개, chunk-matchable 카드는 1,935개이고, `PARTICLE_INFO` 기준 하위 그룹은 104개였다.
+
+**Fix.** `mobile/src/app/sparring.tsx`의 기본 동사 토픽에 동사별/파티클·전치사별 축과 가로 그룹 picker를 추가했다. `poolFor(topic, scopeAxis, scopePick)`은 선택한 verb ID 또는 정확히 일치하는 `PARTICLE_INFO` 태그만 반환한다. 이후 due/known/fresh 보충도 이 scoped 배열 안에서만 수행하므로 다른 그룹 타깃을 섞지 않는다. 영어/한국어 축 문구는 `mobile/src/lib/i18n-messages.ts`에 추가했다.
+
+**검증 (함수 수준: 데이터/정적/타입).**
+
+```text
+F4 scope audit passed: verbGroups=103 rawCards=1956 matchableCards=1935 particleGroups=104 top=to:154,out:140,up:140 prepExamples=to:154,in:135,with:84
+$ cd mobile && npx tsc --noEmit
+(no stdout; exit 0)
+```
+
+실제 iPhone 17 Pro(iOS 26.5) picker에서도 `GET · 42` 선택 시 `get up`만 남고 take/put/give 타깃은 보이지 않았다. 파티클·전치사 축의 `out · 140` 선택 시 `take out`만 남고 get/put/give 타깃은 보이지 않았다. 두 Maestro flow는 exit 0이었다.
+
+**Commits.** `dc1fd68`, `PARTICLE_INFO` 축 교정 `f9ef2c4`
+
+---
+
+## 2026-07-13 — 스파링 403이 초대제 안내 대신 서버 원문을 노출함
+
+**Symptom (검증됨).** API client는 이미 `status`와 `code`를 가진 `ApiError`를 export하지만, 스파링 시작 실패는 모든 오류를 하나의 일반 문구로 처리했다. 백엔드 소스에서 AI gate는 `403 AI_NOT_ALLOWED`, 스파링 gate는 `403 SPARRING_NOT_ALLOWED`를 반환한다. 변경 전 compose 화면은 `ApiError.message`를 직접 표시해 서버 원문이 사용자에게 노출됐다.
+
+**Fix.** 스파링은 두 403 code만 초대제 상태로 분기하고, compose는 `403 AI_NOT_ALLOWED`만 같은 초대제 화면으로 분기한다. 서버 원문은 `[sparring]` 개발 로그에만 남기고, 화면에는 지역화된 초대제 설명과 비용 없는 `/practice` 복귀 버튼을 표시한다. 저장소에는 실제 waitlist route/API가 없어서 동작하지 않는 “대기 신청” 버튼은 만들지 않았다. 다른 status/code는 지역화된 재시도 오류를 유지한다. 공용 `ApiError` 형태가 이미 충분해 Track A 소유의 `packages/core/src/api/client.ts`는 수정하지 않았다.
+
+**검증 (iOS 흐름).** 로컬 mock이 raw marker를 포함한 두 403을 각각 반환하도록 했다. iPhone 17 Pro(iOS 26.5)에서 두 경우 모두 초대제 panel과 “Continue with free practice”가 보였고 raw marker와 Connecting은 보이지 않았다. 무료 연습 버튼은 Practice 화면의 Live sparring 카드로 이동했다.
+
+```text
+SPARRING_NOT_ALLOWED: invite panel visible; RAW_SPARRING_NOT_ALLOWED_DO_NOT_SHOW hidden; COMPLETED
+AI_NOT_ALLOWED: invite panel visible; RAW_AI_NOT_ALLOWED_DO_NOT_SHOW hidden; COMPLETED
+compose L3 source assertions passed
+$ cd mobile && npx tsc --noEmit
+(no stdout; exit 0)
+```
+
+compose iOS 흐름은 개발 앱이 Metro URL을 잃어 아래 오류로 제품 분기 전에 중단됐다. 따라서 compose는 소스 assertion과 타입 검사까지만 확인했으며, iOS/Android 제품 흐름은 통과했다고 기록하지 않는다.
+
+```text
+No script URL provided. Make sure the packager is running or you have embedded a JS bundle in your application bundle.
+```
+
+**Commits.** 스파링 `f9ef2c4`, compose `90810d3`
+
+---
+
+## 2026-07-13 — F5: Claude text completions omitted the prompt-cache marker
+
+**Gap (verified in the pre-change source).** `ClaudeClient.analyzeClip()` marked its stable system
+block for ephemeral caching, but `ClaudeClient.complete()` built the block without that field:
+
+```java
+"system", List.of(Map.of("type", "text", "text", systemPrompt)),
+```
+
+**Cause (verified).** The two methods construct separate Anthropic Messages API request maps, and
+only the `analyzeClip()` map contained `"cache_control", Map.of("type", "ephemeral")`.
+
+**Fix.** `backend/src/main/java/com/tubeshadow/analysis/infrastructure/ClaudeClient.java` now adds
+the same ephemeral marker to `complete()`'s system content block. The new
+`ClaudeClientRequestTest` sends a completion to a local JDK `HttpServer` and inspects the received
+JSON, including system text, user text, token budget, model, and cache-control type. No provider
+request is made by the test. `SPARRING_MODEL` already supported `gpt-realtime-mini` as an environment
+override, so F5 did not change the shared chat/interview fallback model.
+
+**Verification.** `cd backend && ./gradlew test`:
+
+```text
+BUILD SUCCESSFUL in 36s
+4 actionable tasks: 1 executed, 3 up-to-date
+```
+
+**Commit.** This commit; the immutable hash is recorded by Git history.
+
+## 2026-07-13 — F1: mint-only sparring had no server path for an end-of-session report
+
+**Gap (verified).** The F5 commit had no backend route containing `sparring/report`:
+
+```text
+git grep -n 'sparring/report' 7baabac -- backend
+# no matches; exit 1
+```
+
+The realtime bridge sent audio and transcripts between the app and OpenAI, while the backend only
+minted the ephemeral session. It therefore had no learner transcript to summarize after a session.
+
+**Fix.** Added gated, rate-limited `POST /api/practice/sparring/report`, request/response DTOs,
+`CompositionService.sparringReport`, and `SparringReportPrompt`. The client posts learner turns plus
+its own `cardKey`/label targets. The AI sees opaque target IDs; the service requires a complete,
+disjoint used/missed partition and maps IDs back to the original keys. Identical normalized labels
+share one AI classification so separate cards for the same expression cannot be split between used
+and missed. The server does not call `PracticeSrsService` or persist report data.
+
+**Verification.** `cd backend && ./gradlew test --rerun-tasks`:
+
+```text
+BUILD SUCCESSFUL in 3m 27s
+4 actionable tasks: 4 executed
+```
+
+The generated JUnit XML contained no non-zero `failures` or `errors` attribute (`rg` returned no
+matches, exit 1).
+
+**Mobile follow-up (not implemented in this backend commit).** POST a report only after the session
+actually reached `live` and then ended. `connecting` or aborted sessions must send neither a report
+nor grades. For each returned missed target, exclude keys already in the screen's local `hits` set
+(they were already graded `correct:true` live), then call the existing SRS grade endpoint with
+`correct:false`. This avoids promoting and immediately resetting the same card in one session.
+
+**Commit.** This commit; the immutable hash is recorded by Git history.
+
+---
+
+## 2026-07-13 — F2: mock interviews could not receive a job description
+
+**Gap (verified).** The F1 commit had no backend `jobDescription` field or call-chain reference:
+
+```text
+git grep -n 'jobDescription' 0681bb5 -- backend
+# no matches; exit 1
+```
+
+`MockNextRequest` carried only history and seed, so `PracticeController`, `CompositionService`, and
+`MockInterviewPrompt.userMessage` had no role-specific data to use.
+
+**Fix.** Added optional `jobDescription` (maximum 12,000 characters) and threaded it through the
+existing call chain. A nonblank JD is prepended to the user message as delimited untrusted role data;
+the fixed `MockInterviewPrompt.SYSTEM` and strict `{"question": ...}` response contract are unchanged.
+The reserved boundary strings are removed from JD data, null history elements return 400, and a
+null/blank JD produces the previous prompt text exactly.
+
+**Verification.** `cd backend && ./gradlew test --rerun-tasks`:
+
+```text
+BUILD SUCCESSFUL in 2m 25s
+4 actionable tasks: 4 executed
+```
+
+The generated JUnit XML contained no non-zero `failures` or `errors` attribute (`rg` returned no
+matches, exit 1). Tests verify request validation, unchanged no-JD text, JD threading, sentinel
+sanitization, and the existing question parser. They use a mocked provider; whether a live model
+actually produces stack-specific questions is unverified.
+
+**Client follow-up (not implemented in this backend commit).** Add an optional JD paste field on the
+mock-interview screen and include the same `jobDescription` value on every `/interview/mock` request
+in the session, not only the opener.
+
+**Commit.** This commit; the immutable hash is recorded by Git history.
+
+---
+
+## 2026-07-13 — F6: AI routes did not enforce the existing paid-plan entitlement
+
+**Gap (verified against `origin/main` at `3c10afc`).** `User.effectivePlan(now)` existed, but
+`AiGate.java` did not and `PracticeController` contained no `assertEntitled` call. The existing
+realtime `SparringClient` was already mint-only and contained no authorization gate. Therefore all
+eleven AI-backed practice routes lacked plan enforcement.
+
+**Fix.** `AiGate.assertEntitled(userId)` now loads the current `User` from `UserRepository` and
+allows a request when `effectivePlan(Instant.now(clock))` is not `free`. The existing
+`AI_ALLOWED_EMAILS` value remains a case-insensitive owner/tester override based on the current DB
+email. Missing users, free plans, and expired paid plans fail closed with `403 AI_NOT_ALLOWED`.
+All eleven AI-backed controller entry points now pass the authenticated user ID to this single gate,
+including both realtime session minting and the F1 sparring-report endpoint. `SparringClient`
+remains mint-only; authorization is enforced at the controller boundary before it is called.
+
+No credit ledger, entity, repository, or Flyway migration was added. Boolean plan enforcement uses
+the existing user-plan columns and `effectivePlan` behavior.
+
+**Verification.** `cd backend && ./gradlew --no-daemon test --rerun-tasks`:
+
+```text
+BUILD SUCCESSFUL in 32s
+4 actionable tasks: 4 executed
+```
+
+The generated JUnit XML contained no non-zero `failures` or `errors` attribute (`rg` returned no
+matches, exit 1). Tests cover free, active paid, non-expiring paid, expired paid, allowlisted free,
+missing-user, and null-ID gate behavior, plus UUID-gate use by a general AI endpoint and realtime
+sparring. No live billing webhook or paid external-model request was made, so deployed entitlement
+and provider behavior remain unverified.
+
+**Commit.** This commit; the immutable hash is recorded by Git history.
+
+---
+
+## 2026-07-13 — 모바일 mutation 실패가 조용히 사라지거나 grade 카드가 먼저 진행됨
+
+**Symptom.** clip 생성, 보관함 영상 삭제, review grade 실패에는 사용자 피드백이 없었다. 두 drill runner는 `practiceApi.grade`를 fire-and-forget으로 호출한 직후 카드를 진행시켜, 저장 실패 뒤에도 다음 카드로 넘어갔다. 로컬 mock API가 mutation에 HTTP 503을 반환하도록 한 Simulator 검증에서 기존 경로의 실패를 강제로 재현했다.
+
+**Cause (verified).** 세 화면의 `useMutation`에는 로컬 `onError`가 없었고, 두 runner는 `grade.mutate(...)` 뒤 곧바로 `graded.current.add(...)`와 position 변경을 실행했다. 공용 QueryClient는 401 sign-out만 처리한다. grade·review POST는 호출마다 서버 상태를 변경하며 idempotency key가 없어, transport 응답 유실을 자동 재시도하면 중복 반영 가능성이 있다.
+
+**Fix.** L4 mutation 다섯 곳에 localized `Alert`와 명시적 Retry를 추가했다. 401은 기존 전역 sign-out에 맡긴다. clip/delete/review는 ref lock으로 같은 tick 중복 제출을 막고, review Retry는 원래 `{ itemId, quality }`를 보존한다. 두 runner는 `mutateAsync` 성공 뒤에만 `graded`/score/position을 바꾸므로 실패 카드는 그대로 재큐된다. 즉시 실패한 Retry의 두 번째 Alert가 native dismiss 중 유실되지 않도록 Alert 표시만 350 ms 늦춘다. 그 짧은 구간은 synchronous ref와 disabled state로 잠그며, focus/route generation과 active guard가 blur/unmount 뒤의 timer·Retry·성공 UI 전환을 막는다. 응답 유실 시 서버 적용 여부는 클라이언트만으로 확정할 수 없어서 문구도 “결과를 확인하지 못함”으로 표현한다.
+
+**Verification.** iPhone 17 Pro Max Simulator와 로컬 503 mock에서 접근성 출력으로 다음을 확인했다.
+
+```text
+Couldn't confirm the clip
+Couldn't confirm deletion
+Couldn't confirm progress
+Try again
+```
+
+review는 실패 전후 `1 / 1`, DrillRunner는 `1 / 12`, InterviewDrill은 `1 / 18`에 머물렀다. review와 DrillRunner의 Retry는 두 번째 POST를 만들고 다시 `Couldn't confirm progress` Alert를 표시했다. 네이티브 build 출력은 `› Build Succeeded`, `› 0 error(s), and 1 warning(s)`였다. `npx tsc --noEmit --pretty false`도 exit 0으로 끝났다.
+
+**Known gap.** 서버가 mutation을 적용한 뒤 응답만 유실되면 클라이언트는 적용 여부를 확정할 수 없다. 이번 범위에서 자동 retry를 쓰지 않고 불확실성을 알리는 이유다. exactly-once가 필요하면 별도 backend idempotency가 필요하지만 Track D 금지 범위라 변경하지 않았다.
+
+**Commit.** Track D L4 commit (git history records the immutable hash).
+
+**Pattern.** 비멱등 mutation은 “실패했으니 자동 재시도”가 안전하지 않다. 성공 응답 전에는 UI state를 진행시키지 말고, transport ambiguity를 문구에 드러내며 사용자가 현재 상태를 확인한 뒤 명시적으로 재시도하게 한다.
+
+---
+
+## 2026-07-13 — dark appearance에서 입력창만 밝고 Pressable 탭 반응이 보이지 않음
+
+**Symptom.** login/signup/settings/import/compose/videos의 지정 `TextInput` 12개는 밝은 text/background/border 값을 StyleSheet에 고정했고, Track D 허용 UI 파일의 `Pressable` 49개 소스 노드는 pressed style이나 Android ripple을 쓰지 않았다.
+
+**Cause (verified).** 여섯 입력 화면의 StyleSheet와 placeholder prop에서 `#111827`, `#fff`, `#9ca3af` 하드코딩을 확인했다. 설치된 React Native 0.85 타입과 구현은 `Pressable.style`의 `{ pressed }` callback 및 `android_ripple`을 지원하지만 해당 TSX 노드들이 이를 전달하지 않았다.
+
+**Fix.** 지정된 12개 입력은 `useTheme()`의 text/backgroundElement/border/textSecondary/primary를 text, surface, border, placeholder, selection 색에 적용했다. 공용 `pressableStyle`은 pressed opacity를 0.72로 만들고, `pressableRipple`은 Android ripple을 제공한다. 허용된 10개 UI 파일의 Pressable 49개에 둘을 모두 연결했다. 사용자 입력 목록 밖인 DrillRunner AI-check TextInput은 변경하지 않았다.
+
+**Verification.** TSX 정적 검사 출력은 `pressables=49 formTextInputs=12 issues=0`이었다. iPhone 17 Pro Max Simulator appearance를 `dark`로 전환해 login, signup, settings, import, compose, videos Clips 검색 입력이 어두운 surface로 렌더링되고 흰 입력 상자가 남지 않는 것을 화면에서 확인했다. login 링크에 `testOnly_pressed`를 임시 적용했을 때 opacity 감소가 렌더링됐고, prop은 검증 직후 제거했다. `npx tsc --noEmit --pretty false`는 exit 0이었다. Simulator는 검증 뒤 `light`로 복구했다.
+
+**Known gap.** Android ripple 실제 프레임, 실제 손가락 터치 체감, Windows 개발 호스트 실행은 [unverified]다.
+
+**Commit.** Track D L6 commit (git history records the immutable hash).
+
+**Pattern.** dark input은 text만이 아니라 surface/border/placeholder/selection을 한 theme source에서 가져와야 한다. 공통 pressed opacity를 기본으로 두고 Android ripple을 추가하면 플랫폼별 피드백을 한 helper 계약으로 유지할 수 있다.
+<!-- skipped: 91f698e docs: visual redesign spec — Sparring as center tab, token reassignment, per-screen + R1-R4 tracks [no-log] -->
+
+---
+
+## 2026-07-13 — R1 공용 Pressable 구현이 nullable props와 children 타입에서 컴파일되지 않음
+
+**Symptom.** 첫 R1 구현 뒤 `npx tsc --noEmit --pretty false`가 다음 오류로 종료됐다.
+
+```text
+src/components/card.tsx(39,5): error TS2322: Type 'boolean | null' is not assignable to type 'boolean | undefined'.
+  Type 'null' is not assignable to type 'boolean | undefined'.
+src/components/card.tsx(58,52): error TS2322: Type 'boolean | null' is not assignable to type 'boolean | undefined'.
+  Type 'null' is not assignable to type 'boolean | undefined'.
+src/components/chip.tsx(71,5): error TS2322: Type 'boolean | null' is not assignable to type 'boolean | undefined'.
+  Type 'null' is not assignable to type 'boolean | undefined'.
+src/components/chip.tsx(87,52): error TS2322: Type 'boolean | null' is not assignable to type 'boolean | undefined'.
+  Type 'null' is not assignable to type 'boolean | undefined'.
+src/components/chip.tsx(96,9): error TS2322: Type 'ReactNode | ((state: PressableStateCallbackType) => ReactNode)' is not assignable to type 'ReactNode'.
+  Type '(state: PressableStateCallbackType) => ReactNode' is not assignable to type 'ReactNode'.
+src/components/talk-button.tsx(6,8): error TS2305: Module '"react-native"' has no exported member 'ReactNode'.
+src/components/talk-button.tsx(49,5): error TS2322: Type 'boolean | null' is not assignable to type 'boolean | undefined'.
+  Type 'null' is not assignable to type 'boolean | undefined'.
+src/components/talk-button.tsx(69,52): error TS2322: Type 'boolean | null' is not assignable to type 'boolean | undefined'.
+  Type 'null' is not assignable to type 'boolean | undefined'.
+```
+
+**Cause (verified).** 설치된 React Native 0.85 `PressableProps`는 `disabled`에 `null`을 허용하고, `children`에는 `{ pressed }` render function도 허용한다. `ReactNode`는 `react`가 export하며 `react-native`는 export하지 않는다. 같은 RN 소스의 `fontWeight` 변환은 100 단위만 받아 명세의 750을 그대로 넘기면 regular로 처리한다. 또한 `docs/REDESIGN.md` 표의 primary/live/mint 값은 실제 `theme.ts` 값과 달랐고, 사용자 지시는 기존 값을 유지하라고 명시했다.
+
+**Fix.** `theme.ts`는 기존 primary/coral/accent 값을 primary/live/mint 의미로 보존하고 light/dark 양쪽에 liveSoft, mintSoft, amber, ink, pressed와 대비용 on-color를 추가했다. `themed-text.tsx`는 display/body/mono label과 RN 지원값 700의 section을 추가하되 기존 variant 치수는 유지하고 linkPrimary raw color를 제거했다. `pressable-feedback.ts`는 기존 transform 배열과 CSS 문자열을 보존하며 opacity 0.82와 scale 0.98을 합성하고, 별도 focus 상태에 primary outline을 적용한다. `Card`, `Chip`, `PrimaryButton`, `TalkButton`은 nullable disabled를 boolean으로 정규화하고 scheme token, Android ripple, focus ring, 접근성 state, native View ref를 공유한다. `Card`의 interaction 판정에는 press/hover/focus callback을 포함한다. 기존 화면 import를 깨지 않도록 accent/accentSoft/coral과 use-theme helper export는 deprecated 호환 경로로 남겼다.
+
+**Verification.** 최종 명령 출력은 다음과 같다.
+
+```text
+$ npx tsc --noEmit --pretty false
+[exit 0; stdout empty]
+
+$ theme parity and text contrast
+light keys=24 minTextContrast=4.69
+dark keys=24 minTextContrast=7.06
+
+$ focus contrast
+light minFocusContrast=3.74
+dark minFocusContrast=4.63
+
+$ pressed transform composition
+array opacity=0.82 transform=[{"translateX":12},{"rotate":"5deg"},{"scale":0.98}]
+string opacity=0.82 transform=translateX(12px) rotate(5deg) scale(0.98)
+
+$ raw component colors
+rawHexMatches=0
+```
+
+`git diff --check`도 stdout 없이 exit 0이었다. 실제 iOS/Android light/dark 렌더, 손가락 press 체감, 키보드 focus ring은 [unverified]다. R2–R4 화면 통합과 전역 screen raw-color acceptance도 이 R1 범위에서는 [unverified]다.
+
+**Commit.** `117b97c94d616d70b5a4e33df26f64c23d3c67cd`
+
+<!-- override-trigger: e8fed45 Merge remote-tracking branch 'origin/codex/redesign-r1' into integration/tracks — 통합(머지) 커밋이며 852 LOC는 R1 브랜치 자체 커밋들이 이미 로깅한 디자인 토큰·공용 컴포넌트 변경분이다. R1의 troubleshooting/mdx 로그가 이 머지로 함께 들어옴(중복 로깅 불필요). -->
+
+---
+
+## 2026-07-13 — Home 상단 우선순위와 Practice 팩 메타가 redesign 구조와 달랐음
+
+**Symptom.** R3 기준 브랜치의 Home은 동적으로 고른 한 CTA와 두 개의 작은 카드가 중심이었고,
+Practice에는 Sparring이 일반 카드로 남아 있었다. 기준 파일을 읽은 실제 출력은 다음과 같았다.
+
+```text
+23: * knows what to tap in a second. Everything else is one tap behind the two slim cards below.
+173:          {/* The single primary action. */}
+205:          {/* Everything else is one tap behind these two. */}
+226:function MiniCard({ icon, title, onPress }: { icon: SymbolName; title: string; onPress: () => void }) {
+31:      href: '/sparring',
+255:function ToolCard({ tool }: { tool: Tool }) {
+```
+
+**Cause (verified).** 기존 `index.tsx`는 due/recent/latest video 결과로 primary CTA를 바꾸고
+streak를 보조 문구로만 표시했다. 기존 `practice.tsx`는 정적 세로 목록이며 SRS 상태를 읽지 않아
+팩별 due를 계산할 수 없었다. Home streak의 `reviewApi.streak().dueToday`는 clip review 수이고,
+Practice의 `practiceApi.srsStates().dueDate`는 drill-card 수라서 같은 값으로 재사용할 수도 없었다.
+
+**Fix.** `mobile/src/app/(tabs)/index.tsx`는 `me`/`streak`/`recent`와 hydration/error/refetch
+흐름을 유지하면서 ink gradient streak, live Sparring hero, Today's 30/My clips/Weak spots 타일 순서로
+바꿨다. clip count 실패는 타일에 `—`로만 표시해 보조 쿼리가 전체 Home을 가리지 않는다.
+`mobile/src/app/(tabs)/practice.tsx`는 R1 Card/Chip을 쓰는 2열 그리드로 바꾸고 Sparring 카드를
+제거했다. 정적 팩 8개는 실제 카드 count와 `cardIndex()`에 존재하면서 오늘까지 due인 SRS key만
+prefix별로 세며, 탭 focus 때 재조회한다. 기존 top-level route 비교에서 제거된 것은 다음 하나였다.
+
+```text
+href: '/sparring'
+```
+
+다크 appearance 첫 캡처에서는 gradient 위 `Day streak`와 큰 숫자만 보이지 않고 native symbol과
+배경이 있는 due pill은 남았다. **Hypothesis:** RN의 experimental gradient 합성 순서가 plain Text를
+덮었다. **Verified by:** streak content row를 foreground `zIndex: 1`로 올린 뒤 격리된 동일
+시뮬레이터의 다크 재캡처에서 label과 숫자가 다시 표시됐다. RN 내부 원인은 [unverified]다.
+
+**Verification.** 실제 R1 커밋 위 R3 브랜치에서 다음 결과를 얻었다.
+
+```text
+$ npx tsc --noEmit
+[exit 0; stdout empty]
+
+$ raw color scan
+raw_color_hits=0
+
+$ npx expo export --platform ios --output-dir /private/tmp/shadow-r3-ios-export
+iOS Bundled 164338ms node_modules/expo-router/entry.js (1296 modules)
+Exported: /private/tmp/shadow-r3-ios-export
+
+$ npx expo export --platform android --output-dir /private/tmp/shadow-r3-android-export
+Android Bundled 167253ms node_modules/expo-router/entry.js (1733 modules)
+Exported: /private/tmp/shadow-r3-android-export
+```
+
+전용 iPhone 17 Pro Max iOS 26.5 Simulator에서 Home과 Practice를 light/dark 각각 캡처해 streak,
+Sparring hero, 세 타일, 2열 팩 카드와 `count · N due` 가독성을 확인했다. 로컬 계정 Maestro
+검증은 다음처럼 끝났다.
+
+```text
+Tap on "Start talking"... COMPLETED
+Assert that "Topic" is visible... COMPLETED
+Tap on point (50%,65%)... COMPLETED
+Assert that "Library" is visible... COMPLETED
+```
+
+**Known gap.** My clips는 명세대로 기존 `/videos` 화면을 열지만 그 화면의 초기 section은
+`videos`라 Clips pane까지 한 번 더 눌러야 한다. 직접 Clips 진입은 R3 금지 파일인 `videos.tsx`
+route-param 지원이 필요하다. `experimental_backgroundImage`는 RN 0.85 문서가 production 사용을
+경고하는 API지만, 허용 파일과 기존 의존성 안에서 gradient 요구를 충족하기 위해 ink fallback과
+foreground layer를 함께 썼다. Android 실기기 렌더, Dynamic Type, screen reader, R2 center-tab과의
+최종 병합 화면은 [unverified]다.
+
+**Commit.** `20be4750db9c66d928c1950be578e5c6cda1d67d`
+
+**Pattern.** 같은 화면의 “due”라도 review queue와 drill-card SRS는 도메인이 다르다. 시각 메타를
+추가할 때 화면마다 실제 API shape와 key namespace를 먼저 확인해야 한다.
+
+---
+
+## 2026-07-13 — Review·drill 채점 버튼과 Me 입력이 화면별 raw style로 갈라짐
+
+**Symptom.** Review와 두 drill runner는 같은 자가 채점 동작을 서로 다른 raw `Pressable`과
+하드코딩 색으로 표시했고, Me는 통계·계정·입력·삭제 영역을 평평한 `View`로 나열했다. 구현 전
+소스에는 아래 값이 화면별로 직접 들어 있었다.
+
+```text
+Again #dc2626
+Hard #f59e0b
+Good #208AEF
+Easy #10b981
+TextInput color #111827 / background #fff / border #9ca3af
+```
+
+**Cause (verified).** `review.tsx`, `drill-runner.tsx`, `interview-drill.tsx`가 R1의 `Card`, `Chip`,
+`PrimaryButton` 대신 자체 Pressable style을 유지했고, `settings.tsx`도 L6 theme 값을 입력에만
+적용한 채 섹션 구조와 버튼 피드백은 화면 로컬 style로 남겨 두었다. `git diff`에서 위 네 파일의
+기존 raw style과 교체된 공용 컴포넌트 import를 직접 확인했다.
+
+**Fix.** 구현 커밋 `6083d3252c9fb7f1b66b291d1046ae4546da080f`에서 Review의
+Again/Hard/Good/Easy를 각각 live/amber/primary/mint `Chip`으로 바꾸고 2단계 Y축 카드 flip,
+reduced-motion 우회, focus/blur 세대 가드를 추가했다. Me는 학습 통계·플랜·프로필·비밀번호·로그아웃·
+삭제를 `Card` 섹션으로 묶고 theme 기반 입력과 공용 버튼을 사용한다. 두 drill runner는 기존
+`practiceApi.grade` 호출과 성공 후 진행 순서를 유지한 채 같은 Card/Chip/Button 표현으로 바꿨다.
+
+**Verification.** `npx tsc --noEmit --pretty false`는 stdout 없이 exit 0이었다. Expo SDK는
+`56.0.12`, React Native는 `0.85.3`이었고 최종 export는 다음 출력으로 끝났다.
+
+```text
+iOS Bundled 27850ms node_modules/expo-router/entry.js (1645 modules)
+Exported: /tmp/r4-export-ios
+Android Bundled 27767ms node_modules/expo-router/entry.js (1730 modules)
+Exported: /tmp/r4-export-android
+```
+
+지정 네 파일의 임시 QA marker와 raw color 정적 검사는 `QA markers/raw colors: none`을 출력했다.
+iOS Simulator 캡처에서 Me의 상·하단을 light와 dark로 확인했다. 모든 grade 버튼의 실제 손가락
+pressed frame, 카드 flip 중간 frame, Android ripple, VoiceOver/TalkBack은 확인하지 않았다.
+
+**Commit.** `6083d3252c9fb7f1b66b291d1046ae4546da080f`.
+
+## 2026-07-14 — 스파링 독립 중앙 탭 승격 (R2, 직접구현)
+
+Codex R2 미산출(커밋 0)이라 직접: `sparring.tsx` → `(tabs)/sparring.tsx`, 커스텀 `tabBarButton`으로 중앙 부양 `live` 코랄 마이크, videos `href:null`, 루트 라우트 제거, safe-area top. `@react-navigation/bottom-tabs` 타입 미존재라 로컬 `TabBarButtonProps`(onPress `(...args:any[])`)로 우회. tsc exit 0.
+
+<!-- skipped: bbd1af2 [R2] Wire sparring center tab — 유실된 _layout 배선 재적용(중간 checkout이 커밋 전 되돌림). R2 기능은 2026-07-14-redesign-sparring-tab.mdx + 위 R2 troubleshooting 항목에 이미 기록됨. -->
+<!-- skipped: d84d70a chore(log): mark bbd1af2 as re-apply of already-logged R2 [no-log] -->
+<!-- skipped: 31e1ac2 docs: motivation & usability spec — mastery visibility, goal-gradient, peak-end, ease laws (U1-U4) [no-log] -->
+<!-- skipped: e78cb54 chore(log): hook skip markers [no-log] -->
+
+---
+
+## 2026-07-14 — 정적 SRS 팩 전체 집계가 없고 Vitest 기대값이 두 팩에 머묾
+
+**Symptom.** U1 구현 전 전체 frontend Vitest가 다음 출력으로 실패했다.
+
+```text
+FAIL  tests/practice-cards.test.ts > cardIndex > indexes every item across both decks
+AssertionError: expected 4233 to be 448 // Object.is equality
+Test Files  1 failed | 5 passed (6)
+Tests  1 failed | 31 passed (32)
+```
+
+**Cause (verified).** `frontend/tests/practice-cards.test.ts`의 기대값은 pattern과 collocation만
+더했지만, `packages/core/src/practice-cards.ts`의 `cardIndex()`는 이미 8개 정적 SRS 팩을 모두
+인덱싱했다. core에는 이 정적 크기와 `SrsCard` 상태를 결합해 mastery를 계산하는 공용 selector도
+없었다. `PracticeProgress.reps`는 타입과 백엔드 DTO 주석 모두 오늘 횟수이므로 실제 주간 합계로
+바꿀 근거가 없었다.
+
+**Fix.** `packages/core/src/practice-mastery.ts`에 8개 정적 팩 크기, `selectMastery`, React 의존성
+없는 `useMastery` wrapper, `selectPracticeRhythm`/`selectWeeklyRhythm`을 추가했다. 실제
+`cardIndex()`에 있는 키만 집계하고, box 1~3은 learning, box 4 이상은 mastered로 분류한다.
+상태 없는 카드는 `total - mastered - learning`으로 new가 된다. 리듬 요약은 일간 값을
+`repsToday`로 명시한다. `packages/core/src/api/practice.ts`에는 실제 F1 DTO에 맞춘
+`practiceApi.sparringReport(userTurns, targets)`를 추가했다. selector·팩 집계·빈 상태·상태 없는
+카드·API body 회귀 테스트를 추가하고 기존 cardIndex 기대값을 전체 정적 팩 크기로 교체했다.
+
+**Verification.** 최종 출력은 다음과 같았다.
+
+```text
+Test Files  8 passed (8)
+Tests  40 passed (40)
+```
+
+`npx tsc --noEmit --pretty false --incremental false`는 stdout 없이 exit 0이었고,
+`git diff --check`도 stdout 없이 exit 0이었다. 화면 수준 동작과 실제 F1 네트워크 호출은
+[unverified]다.
+
+**Commit.** `f2055fa8b28270fb74f41b22936cc43638b16fac`
+
+<!-- override-trigger: 76ae949 Merge branch 'codex/ux-u1' into integration/tracks — 통합 커밋. 422 LOC는 U1(useMastery·sparringReport 래퍼·vitest12)의 자체 커밋 f2055fa/5658a17이 이미 로깅한 변경분이며, U1의 mdx(2026-07-14-u1-mastery-data-layer.mdx)와 troubleshooting 항목이 이 머지로 함께 들어옴. 중복 로깅 불필요. -->
+---
+
+## 2026-07-15 — Home에 실제 Practice 진척과 절제된 스트릭 위험 신호가 없었음
+
+**Symptom.** U2 전 `integration/tracks` Home에는 U1 mastery selector나 Practice progress를
+읽는 경로가 없었다.
+
+```text
+$ git show integration/tracks:'mobile/src/app/(tabs)/index.tsx' | rg -n 'Mastery|practiceProgress|useMastery'
+[exit 1; stdout empty]
+```
+
+**Cause (verified).** 기존 Home은 `reviewApi.streak()`의 클립 복습 스트릭만 조회했다.
+`PracticeProgress.reps`는 오늘 횟수이며 실제 7일 이력이 없고,
+`selectPracticeRhythm()`도 이를 `repsToday`로 명시한다. 따라서 주간 횟수는 현재 API로 만들 수
+없었다. U1의 mastery 정의는 정적 카드 중 현재 `box >= 4`인 수이며, 평생 누적 달성 수가 아니다.
+
+**Fix.** 구현 커밋 `65f3bf083a84dc0fbda20f14375aaaef4fe1f8c2`에서
+`mobile/src/app/(tabs)/index.tsx`가 `practiceApi.srsStates()`와 날짜별
+`practiceApi.progress()`를 읽고 `useMastery()`/`selectPracticeRhythm()`으로 Home 요약을 만든다.
+신규 `mobile/src/components/mastery-summary.tsx`는 R3 ink 카드 바로 아래에 theme-token 기반
+progress bar와 `오늘 reps · Practice streak · 익힘/전체`를 표시한다. 숫자는 tabular-nums다.
+
+위험 넛지는 로컬 18시(명세에 정확한 시간이 없어 **APPROX** 경계), `repsToday === 0`,
+`streak > 0`, 당일 progress refetch 성공을 모두 만족할 때만 한 줄로 노출한다. 계정별 최근 노출
+로컬 날짜를 SecureStore에 먼저 기록해 같은 기기에서는 하루 한 번만 보이며, 저장 실패 시 반복
+노출 대신 숨긴다. focus, AppState active, 시간/날짜 경계에서 서버 progress를 다시 확인한다.
+
+**Verification.** 최종 정적 검사는 다음 출력이었다.
+
+```text
+$ cd mobile && npx tsc --noEmit --pretty false
+[exit 0; stdout empty]
+
+$ cd frontend && npm test -- --run tests/practice-mastery.test.ts
+Test Files  1 passed (1)
+Tests  7 passed (7)
+
+$ git diff --check
+[exit 0; stdout empty]
+```
+
+iPhone 17 Pro Max iOS 26.5 Simulator의 dark Home에서 채점 전 실제 값과 저녁 넛지를 확인했다.
+
+```text
+Assert that "Today 0 reps · 🔥 1-day streak" is visible... COMPLETED
+Assert that "Today 0 reps. 1-day streak. 0 of 4233 learned." is visible... COMPLETED
+Assert that "🔥 1-day streak — nothing yet today" is visible... COMPLETED
+```
+
+같은 로컬 날짜 재실행에서는 넛지가 다시 나오지 않았고, Pattern drill의 due box-3 카드를
+`Got it`으로 채점한 뒤 Home 값이 증가했다.
+
+```text
+Assert that "🔥 1-day streak — nothing yet today" is not visible... COMPLETED
+Tap on "Got it"... COMPLETED
+Assert that "Today 1 reps · 🔥 1-day streak" is visible... COMPLETED
+Assert that "Today 1 reps. 1-day streak. 1 of 4233 learned." is visible... COMPLETED
+```
+
+채점 후 DB는 대상 카드 `box=4`, `correct_count=4`, `reps_today=1`, `total_reps=5`였다. 같은
+Home 상태를 light와 dark에서 캡처해 progress 카드가 ink 카드 아래, Sparring 위에 있고 두
+테마 모두 읽을 수 있음을 시각 확인했다.
+
+**Known gaps.** 같은 시각의 다른 기기에서 연습했는지를 push 방식으로 즉시 알 수는 없다;
+Home focus/foreground refetch 뒤에는 서버 값을 따른다. R3 ink 카드의 숫자는 clip-review streak,
+U2 요약은 PracticeProgress streak라 두 값은 서로 다른 도메인이며 실제 캡처에서도 달랐다.
+Android 실기기와 screen reader는 [unverified]다.
+
+**Commit.** `65f3bf083a84dc0fbda20f14375aaaef4fe1f8c2`
+
+**Pattern.** 날짜·시간 조건 UI는 최초 render만 보지 말고 화면 focus, foreground 복귀,
+시간/자정 경계에서 서버의 당일 상태를 다시 읽어야 한다.
+
+---
+
+## 2026-07-14 — 낙관 채점의 SRS 갱신이 드릴 세션 키를 바꿔 진행률을 초기화함
+
+**Symptom.** U3의 첫 iOS Simulator 오답 재큐 검증에서 다음 assertion이 실패했고, 캡처의
+카운터는 다음 카드로 넘어간 직후 다시 `1 / 30`을 표시했다.
+
+```text
+Assertion is false: "2 / 31" is visible
+```
+
+**Cause (verified).** `mobile/src/app/today.tsx`는 `srs.data`로 세션을 다시 만들고 카드 key 전체를
+`DrillRunner`의 React key로 사용한다. 기존 `drill-runner.tsx`는 채점 성공 시 공유 `['srs']`
+query를 즉시 invalidate/refetch했다. 낙관적으로 다음 카드를 먼저 연 상태에서 이 데이터가
+바뀌면 부모가 다른 key로 runner를 다시 mount해 로컬 `pos`, `queue`, 진행률을 초기화할 수 있었다.
+또한 runner의 자체 `useQuery(['srs'])`도 캐시가 있어도 mount refetch를 시작하는 경합이 있었다.
+
+**Fix.** 구현 커밋 `07229bd15d60a0c8eb02e8d6b5d3cc32fc11e843`에서
+`mobile/src/components/drill-runner.tsx`가 세션 시작 시 SRS snapshot을 잡고, 채점 결과는 그
+snapshot에만 합친다. 공유 query는 `refetchType: 'none'`으로 stale 표시만 하며, runner의 fallback
+조회는 snapshot이 없을 때만 활성화한다. 같은 커밋은 단조 진행바·워밍업 credit·막판 강조·낙관
+채점 오류 queue와 `session-summary.tsx`의 드릴/스파링 peak-end 화면을 추가했다.
+
+**Verification.** 최종 코드에서 `npx tsc --noEmit`과 `git diff --check`는 stdout 없이 exit 0이었다.
+Mimi R3 Visual iOS 26.5 Simulator의 한 세션은 다음 순서로 exit 0을 기록했다.
+
+```text
+Assert that ".*1 / 13.*" is visible... COMPLETED
+Assert that ".*2 / 14.*" is visible... COMPLETED
+Assert that ".*12 / 14.*" is visible... COMPLETED
+Assert that "3 left!" is visible... COMPLETED
+Assert that "SESSION COMPLETE" is visible... COMPLETED
+Tap on "Done"... COMPLETED
+Assert that "Hi, U2 Simulator" is visible... COMPLETED
+```
+
+스파링 리포트의 실제 성공·실패 네트워크 응답, Android, light appearance는 [unverified]다.
+
+**Commit.** `07229bd15d60a0c8eb02e8d6b5d3cc32fc11e843`.
+
+**Pattern.** 부모가 child key를 shared query 결과로 만들면, 낙관 UI 중 그 query를 갱신하지 말고
+세션 로컬 snapshot과 종료 후 authoritative reconciliation을 분리해야 한다.
+
+---
+
+## 2026-07-14 — 팩 mastery가 Practice 카드에 없고 축하 receipt 경계가 없음
+
+**Symptom.** U1의 `useMastery().byPack`은 8개 정적 팩 집계를 제공했지만 Practice 팩 카드는
+전체 수와 due만 표시했다. 마스터 100, 스트릭 7·30·100, 첫 스파링 완료를 한 번만 축하하는
+로컬 receipt나 토스트 컴포넌트도 없었다.
+
+**Cause (verified).** 구현 전 `practice.tsx`는 `practiceApi.srsStates()`로 due를 세는 경로만
+사용했고 `useMastery`를 import하지 않았다. 저장소 검색에서도 U4 마일스톤 ID와 receipt helper는
+존재하지 않았다.
+
+**Fix.** 구현 커밋 `dd65821ddc45af58c8b5a88b71300dbc7c74839e`에서 8개 카드에
+`PracticePackId`를 연결해 `mastered/total` 메타와 4px 진행바를 추가했다. 사용자별
+SecureStore(웹은 localStorage) 상태에는 이전 수치, 축하 완료, pending queue를 저장한다. Toast는
+focus된 Practice에서만 claim하고 실제 `onLayout` 뒤 receipt를 acknowledge한다. 레이아웃 전 blur는
+lease를 반환하고, 레이아웃 뒤 저장 중 blur는 직렬화된 acknowledge를 기다린다. reduced-motion이면
+scale·fade timing을 생략하고 iOS에서는 접근성 announcement를 보낸다.
+
+**Verification.** 최종 커밋 상태에서 `npx tsc --noEmit --pretty false --incremental false`와
+`git diff --cached --check`는 stdout 없이 exit 0이었다. 저장값을 99/6으로 만든 뒤 100/7을 넣은
+in-memory 시뮬레이션은 다음을 출력했다.
+
+```text
+{"manipulated":"99-to-100","concurrentClaims":1,"queued":["mastery-100","streak-7"],"repeat":null,"firstSparring":"one-time"}
+```
+
+별도 iOS Simulator의 다크 화면에서는 `100 expressions mastered`와 `0/1956 mastered`, 라이트·
+다크 재진입 흐름에서는 `128/502 mastered`를 확인했다. 같은 receipt로 Today→Practice를 다시
+열었을 때 자동화 출력은 `Assert that "100 expressions mastered" is not visible... COMPLETED`였다.
+이 캡처 뒤 최종 커밋에는 receipt 시점을 렌더 전에서 `onLayout` 뒤로 옮기고 접근성 속성을 추가했다.
+그 최종 head를 다시 Metro로 로드한 2.2초 production 설정에서 로그는 `claim-result → render →
+layout → acknowledged → claim-result null` 순서를 보였다. Maestro의 화면 settle보다 2.2초가 짧아
+blur 시뮬레이션에서만 표시 시간을 임시 20초로 늘렸고, 접근성 label selector로 다음 출력까지
+확인했다.
+
+```text
+Assert that "Milestone. 100 expressions mastered" is visible... COMPLETED
+Assert that "Milestone. 100 expressions mastered" is not visible... COMPLETED
+Assert that "128/502 mastered" is visible... COMPLETED
+```
+
+임시 시간·진단 로그는 제거했고, 이후 worktree는 clean이며 TypeScript가 다시 exit 0이었다.
+
+실제 스파링 `done` 경로의 helper 호출은 금지된 U3 파일 범위라 [unverified]이며, 웹 다중 탭의
+동시 claim과 실기기 VoiceOver/TalkBack·reduced-motion 동작도 [unverified]다.
+
+**Commit.** `dd65821ddc45af58c8b5a88b71300dbc7c74839e`.
+
+---
+
+### Symptom — parallel Codex tracks U2/U3/U4 integration; a "reverted" commit survived on the branch ref
+
+```
+$ git log --oneline origin/integration/tracks..integration/tracks
+a23fdee chore(log): override false trigger ...
+7117271 docs(log): practice YouTube hero fix ...
+fcfbd50 fix(practice): restore YouTube shadowing as a first-class entry
+$ grep -c ShadowHero mobile/src/app/(tabs)/practice.tsx
+2
+```
+
+A prior working-tree revert reported success, but local `integration/tracks` still carried the 3 commits.
+
+**Cause (verified).** The earlier `git reset --mixed origin/integration/tracks` had run on a detached HEAD,
+not the branch ref, so the branch pointer never moved. `git status` was clean and the working tree looked
+reverted, masking it. Nothing was pushed (origin clean at e77f24e).
+
+**Fix.** `git reset --hard origin/integration/tracks` (tree was clean, safe) before merging. Then merged
+U2/U3/U4 `--no-ff`; only conflicts were docs/troubleshooting.md (union) and i18n-messages.ts (auto-merged,
+no dup — tsc strict TS1117 clean). Wired the U3×U4 seam `markFirstSparringComplete()` in sparring.tsx
+(me query + useEffect on phase==='done', record-only, no render change). `npx tsc --noEmit` exit 0.
+
+**Pattern.** After a revert, verify the BRANCH REF (`git log origin/<branch>..<branch>`), not just the
+working tree — a clean status can coexist with a branch pointer still carrying the "dropped" commit.
+
+---
+
+### Symptom — card labels cut off with an ellipsis (Practice pack cards, Home tiles)
+
+User on build 21: "카드들 글자도 잘려있다". Titles/subtitles truncated mid-word.
+
+**Cause (verified).** `ToolCard` (practice.tsx:307,313) and `HomeTile` (index.tsx:377,383) capped text
+at `numberOfLines={2}`. Worsened after U4 added a mastery block (익힘 N/M + progress bar) to pack cards,
+squeezing the remaining vertical space so 2 lines no longer held the label (esp. at larger Dynamic Type).
+
+**Fix.** Removed the `numberOfLines={2}` caps on both card grids. Cards use `minHeight` (grow with content)
+and their row containers default to `alignItems: 'stretch'`, so siblings in a row match the tallest — text
+now fully wraps, nothing is clipped, rows stay even. `npx tsc --noEmit` exit 0.
+
+**Commit.** `0b719df`
+
+**Pattern.** A fixed `numberOfLines` on variable-length labels inside a min-height card truncates as soon as
+content grows (extra rows, bigger fonts). For adaptive cards, drop the line cap and let the card grow.
+<!-- skipped: 94f7a1b docs(log): card text truncation fix (0b719df) [no-log] -->
+
+---
+
+## 2026-07-15 — Android release audit exposed platform weights, fixed insets, and an unclean Expo dependency check
+
+**Symptom.** The first native Gradle configuration under the default JDK 21 stopped before compiling:
+
+```text
+Class org.gradle.jvm.toolchain.JvmVendorSpec does not have member field 'org.gradle.jvm.toolchain.JvmVendorSpec IBM_SEMERU'
+BUILD FAILED in 12s
+```
+
+The repository audit also found `SymbolView` weights passed as plain strings, a fixed-height tab bar that
+did not consume the device bottom inset, `Menlo` in 12 Android-reachable styles, and microphone-denial
+paths that returned without a Settings recovery action. The production build's dependency check was not
+clean; the local package declaration check printed:
+
+```text
+expo-asset MISSING
+@expo/ui ~56.0.18
+expo 56.0.12
+expo-constants ~56.0.16
+expo-linking ~56.0.14
+expo-router ~56.2.11
+expo-splash-screen ~56.0.10
+```
+
+**Cause (verified).** `expo-symbols/src/utils.ts` selects the Android font only from
+`weight.android`; a string weight falls back to regular. Its Android `SymbolView.tsx` loads the font in an
+effect with an empty dependency list, so a focused tab needs a remount when its platform weight changes.
+The tab layout used numeric `height: 74` and `paddingBottom: 12`, while Sparring requested only the bottom
+safe-area edge. The package manifest does not directly declare the `expo-asset` peer required by
+`expo-audio`; dependency/version alignment remains unresolved because adding dependencies requires owner
+approval.
+
+**Fix.** Implementation commit `08807010430e28a88a052fb9d2077922ee88d2f0` uses Expo's Android
+weight modules (and a focus key for tab icons), reserves the measured bottom inset, adds Sparring's top
+safe-area edge, replaces the 12 `Menlo` uses with the existing `Fonts.mono` token, and gives both recorder
+paths an i18n Settings recovery alert. `MicInput` also resets recording audio mode after stop.
+
+**Verification.** `./node_modules/.bin/tsc --noEmit` printed `tsc_exit=0`. The static symbol check found
+16 direct `SymbolView` instances, zero literal names, zero object names missing `android`, 31 unique Android
+names, and zero names missing from Expo's 4,055-entry map. With JDK 17 plus the SDK path, the same Gradle
+configuration printed `BUILD SUCCESSFUL in 5s` and target/compile SDK 36, min SDK 24, NDK 27.1.12297006.
+
+The local release APK is 110,160,926 bytes and `apksigner` printed `Verifies`; `aapt` reported package
+`ai.daeseon.mimi`, version 1.1.0 (code 1), min 24, target 36, RECORD_AUDIO, and four ABIs. The local
+production AAB is 76,821,106 bytes with SHA-256
+`b65531d797916f8b6e7479cd5ac29b4f93889d52fcd8c2256e20d0cb26591bf7`; `unzip -t` reported no compressed
+data errors. `jarsigner` printed `jar verified` but also self-signed/timestamp and JarFile/JarInputStream
+warnings, and offline bundletool validation could not resolve four uncached transitive artifacts, so Play
+acceptance remains [unverified].
+
+The API 34 arm64 emulator reported `device`, boot flag `1`, APK install `Success`, and Mimi cold launch
+`Status: ok`. One later capture showed `Application Not Responding: com.android.systemui`; the emulator
+session subsequently exited with `Failed to find ColorBuffer` and `Failed to restore previous context`.
+A software-GPU cold boot completed in 26,101 ms and launched Mimi, but then showed an ANR dialog for
+Digital Wellbeing. After choosing Wait, Mimi remained `topResumedActivity` and the explicit window scan
+printed `anr_window=absent`. `dumpsys activity lastanr` reported no stored ANR and RAM status was normal,
+so the emulator-service dialog cause remains [unverified]. Successful authentication, shadowing,
+Sparring, review, microphone permission, and physical-device behavior also remain [unverified].
+
+**Commit.** `08807010430e28a88a052fb9d2077922ee88d2f0`.
+
+**Pattern.** For Expo symbols on Android, audit both the platform name map and the platform weight module;
+an iOS-valid string weight can silently render as Android regular even when the icon name itself is valid.
+
+---
+
+## 2026-07-15 — Android symbol-weight imports added three Material fonts to the iOS export
+
+**Symptom.** The first production iOS export after the Android weight fix listed these Android-only
+assets:
+
+```text
+node_modules/@expo-google-fonts/material-symbols/400Regular/MaterialSymbols_400Regular.ttf (956KB)
+node_modules/@expo-google-fonts/material-symbols/600SemiBold/MaterialSymbols_600SemiBold.ttf (959KB)
+node_modules/@expo-google-fonts/material-symbols/700Bold/MaterialSymbols_700Bold.ttf (958KB)
+```
+
+Its metadata contained 26 assets and 3 TTF entries.
+
+**Cause (verified).** Eight common TSX files statically imported `expo-symbols/androidWeights/*`. Metro
+therefore followed the font modules while producing the iOS bundle even though iOS `SymbolView` ignores
+the Android half of the platform weight object.
+
+**Fix.** Commit `30db598a8588cba7b0075bed352d1e5a20d4752c` routes all weight imports through
+`mobile/src/lib/symbol-weights.ts`, while `symbol-weights.ios.ts` exports type-compatible inert Android
+values without importing the fonts. Android and web resolve the real font module; iOS resolves the
+platform file.
+
+**Verification.** `tsc_exit=0`. Production exports printed `iOS Bundled ... (1653 modules)` and
+`Android Bundled ... (1744 modules)`. Parsed metadata changed from `before_ios_assets=26` /
+`before_ios_ttf=3` to `after_ios_assets=23` / `after_ios_ttf=0`; Android remained
+`android_asset_count=29` / `android_ttf_count=3`. The current native Android `bundleRelease` printed:
+
+```text
+BUILD SUCCESSFUL in 2m 46s
+607 actionable tasks: 75 executed, 532 up-to-date
+```
+
+Its AAB is 76,823,624 bytes with SHA-256
+`2b39ceb5742e3d52a991dedac42bf76515704241ef54cdfcc6cdddacc651fd63`; ZIP integrity reported no errors
+and `jarsigner` printed `jar verified` with warnings. The generated release configuration explicitly uses
+`signingConfig signingConfigs.debug`, so this current-source AAB is a native build check rather than a
+production-signing check.
+
+The matching current-source APK is 110,161,198 bytes with SHA-256
+`91ad0f3e8b8f199522e21f63cb09cf58d11354c64ba9edce5c668d9b652404e3`; `apksigner` printed `Verifies`
+and `Verified using v2 scheme ... true`. It installed with `Success`, cold-launched
+`ai.daeseon.mimi/.MainActivity` with `Status: ok`, and the onboarding capture rendered the Android bold
+waveform symbol. The emulator is not a persistent release gate: a later device query returned an empty
+device list.
+
+A fresh EAS local production build was then attempted from the same source with local version code 2,
+`autoIncrement=false`, and the stored production keystore. EAS reported `19/21 checks passed` before
+continuing the native build, but the process ended before artifact creation with exit code 143 and
+`[ABORT] Received termination signal.` No current-source production-signed AAB was produced. iOS native
+compilation, authenticated Android flows, and Play acceptance remain [unverified].
+
+**Commit.** `30db598a8588cba7b0075bed352d1e5a20d4752c`.
+
+**Pattern.** A platform-specific asset import in a common React Native module is still a cross-platform
+bundle dependency. Put the import behind Metro's platform-file resolver, then compare exported asset
+manifests for both platforms.
+
+---
+
+## 2026-07-15 — Expo SDK 56 dependency alignment closed Doctor but release bundles still require explicit API env
+
+**Symptom.** The Android production audit stopped at `19/21 checks passed`. Expo Doctor reported that
+`expo-audio`'s `expo-asset` peer was not declared directly and that six Expo packages were behind the SDK
+56 expected patch versions. A fresh native release bundle built after the upgrade, but the first Gradle
+command omitted `EXPO_PUBLIC_API_URL`; `src/lib/api.ts` deliberately throws in a release build when that
+value is absent.
+
+**Cause (verified).** `mobile/package.json` declared Expo 56.0.12, omitted `expo-asset`, and pinned the six
+packages below Doctor's expected patch versions. The EAS production profile contains
+`EXPO_PUBLIC_API_URL=https://api.mimi.daeseon.ai`, but a direct local `gradlew` invocation does not consume
+that EAS profile automatically. The isolated prebuild copy had no `.env*` file, so the first native
+artifact was compile evidence only and not suitable for account testing.
+
+**Fix.** Commit `1cfd379` adds `expo-asset` 56.0.20 and its config plugin, and aligns `@expo/ui` 56.0.22,
+`expo` 56.0.16, `expo-constants` 56.0.21, `expo-linking` 56.0.15, `expo-router` 56.2.15, and
+`expo-splash-screen` 56.0.13. The production URL was then passed explicitly while rerunning
+`:app:createBundleReleaseJsAndAssets`, followed by APK/AAB repackaging.
+
+**Verification.** `npx expo-doctor` printed `21/21 checks passed. No issues detected!`,
+`npx expo install --check` printed `Dependencies are up to date`, and TypeScript printed `tsc_exit=0`.
+Production exports completed with 23 iOS assets and 29 Android assets; only Android retained the three
+Material Symbols TTFs. A fresh prebuild completed and the first native build printed:
+
+```text
+BUILD SUCCESSFUL in 7m 38s
+662 actionable tasks: 652 executed, 10 up-to-date
+```
+
+After the API environment correction, the generated bundle scan printed `prod_url_matches=1` and
+`missing_env_error_matches=0`; repackaging printed `BUILD SUCCESSFUL in 48s`. The final APK is 110,165,698
+bytes with SHA-256 `14231089a9429c7f0777f4dd0c087969c26458779137685b0f1e9c7339a1366b`; `apksigner` printed
+`Verifies` and v2 `true`. The final AAB is 76,828,148 bytes with SHA-256
+`0dd487e55c984c0f713d30227ebf914c42a42a24b0731a5876cb3e33ad16b639`; ZIP integrity reported no errors
+and `jarsigner` printed `jar verified`. Both packaged bundles contained the production API URL exactly
+once. The generated release block still uses the debug keystore, so production-key signing remains a
+separate gate.
+
+`npm audit` reports 11 moderate, zero high, and zero critical findings through the Expo CLI/config →
+`xcode` → `uuid <11.1.1` chain. Its advertised automatic fixes downgrade Expo across major SDK versions,
+so no audit fix was applied; runtime exploitability remains [unverified].
+
+**Commit.** `1cfd379`.
+
+**Pattern.** A successful native release compilation does not prove a usable release artifact when public
+build-time environment variables are mandatory. Scan the packaged JS bundle for the expected public URL,
+not merely the Gradle exit code.
+
+---
+
+## 2026-07-16 — 세 제품 기둥 중 쉐도잉·영작이 탭바에 없고 복습·연습은 재배치가 필요함
+
+**Symptom.** 구현 전 탭 선언을 같은 parser로 읽으면 다음 구조였다.
+
+```text
+before_visible=index,practice,sparring,review,settings
+before_hidden=videos
+```
+
+`compose`는 루트 Stack 화면이었고, Home에는 My Clips 타일만 있어 탭에서 내릴 Practice와 Review의
+새 허브 진입점이 없었다.
+
+**Cause (verified).** 구현 전 `_layout.tsx`는 `practice`와 `review`를 보이는 탭으로 선언하고
+`videos`만 `href: null`로 숨겼다. `app/compose.tsx`는 `(tabs)` 밖에 있었고, Home의 두 번째 타일은
+`clipsApi.list()` 결과를 표시하며 `/videos`로 이동했다. 이 상태는 구현 커밋의 부모 tree와
+`f8349a3` diff에서 확인했다.
+
+**Fix.** `mobile/src/app/(tabs)/_layout.tsx`를 Home · Shadow · Speaking · Write · Me 순서로
+재배치하고 Practice/Review는 삭제 없이 숨은 라우트로 남겼다. Compose를 `(tabs)`로 이동하면서
+테마 토큰·SafeArea·접근성 버튼 상태를 정리했다. Home은 기존 streak, MasterySummary, Sparring
+hero를 유지하고 최상단 Review CTA와 Practice 타일을 갖도록 바꿨다. 새 탭/홈 문자열은
+`mobile/src/lib/i18n-messages.ts`의 영어·한국어 사전에 함께 추가했다. Expo Router 56이 custom
+tab button에 주는 `aria-selected`를 Speaking 버튼이 소비하도록 해 Android 접근성 tree에서도
+현재 탭을 selected로 노출한다.
+
+검증된 최종 선언은 다음과 같다.
+
+```text
+after_visible=index,videos,sparring,compose,settings
+after_hidden=practice,review
+practice_hrefs=15
+```
+
+`./node_modules/.bin/tsc --noEmit --pretty false --incremental false`와 `git diff --check`는 stdout
+없이 exit 0이었다. 최종 iOS/Android production export도 각각 exit 0이었다.
+
+```text
+iOS Bundled 43644ms node_modules/expo-router/entry.js (1655 modules)
+Android Bundled 44118ms node_modules/expo-router/entry.js (1740 modules)
+BUILD SUCCESSFUL in 24s
+605 actionable tasks: 60 executed, 545 up-to-date
+Performing Streamed Install
+Success
+Status: ok
+LaunchState: COLD
+```
+
+Android 에뮬레이터에서 다섯 탭이 각 화면을 열었고, Home의 Review CTA는 Review 화면을,
+`Practice. All packs` 타일은 Practice 팩 그리드를 열었다. Speaking의 최종 접근성 node는
+`content-desc="Speaking" ... selected="true"`였다. iOS 실기기 탭 터치, dark appearance,
+AND 트랙과 합친 뒤의 양 플랫폼 재검증은 [unverified]다. `npm run lint`는 ESLint 설정이 없어
+검사를 실행하지 않고 자동 설치를 시도했으므로 중단했으며, 자동 package 변경은 제거했다.
+
+**Commit.** `f8349a3f98db2fc19cae468138114b1443f8eacd`.
+
+**Pattern.** 탭 정보구조를 바꿀 때는 보이는 항목만 교체하지 말고, 내려간 화면의 새 진입점과
+기존 deep link 보존을 한 수용 기준으로 묶어야 한다.
+
+---
+
+## 2026-07-16 — AND 위에 메뉴 재편을 합치면 플랫폼 심볼·safe area·Home 오류 도달성이 다시 깨질 수 있음
+
+**Symptom.** Android 준비 브랜치 위에 메뉴 재편 구현을 적용했을 때 탭 레이아웃이 충돌했다.
+M 쪽의 단일 문자열 `weight="bold"`를 고르면 Android Material Symbols의 실제 bold font 선택이
+사라지고, AND 쪽 파일 전체를 고르면 새 5탭 구조와 Expo Router 56의 `aria-selected` 처리가
+사라지는 형태였다. 승격 대상인 `videos.tsx`에는 raw hex 색상 11곳도 남아 있었다. 또한 Home은
+`me` 또는 `streak` 최초 요청 실패 시 전체 `ErrorState`로 조기 반환해, 탭에서 숨긴 Review와
+Practice 진입점까지 같이 없어졌다.
+
+**Cause (verified).** 양 트랙이 공통으로 수정한 파일은 `docs/troubleshooting.md`, 탭 `_layout.tsx`,
+Home `index.tsx` 세 개였다. 실제 cherry-pick은 `_layout.tsx`의 Speaking 심볼 weight와 EOF 로그
+append에서 충돌했다. Home의 오류 guard와 `videos.tsx`의 11개 raw color는 통합 tree 검색으로
+확인했다.
+
+**Fix.** `codex/and-m-integration`을 AND HEAD에서 분리하고 M 구현과 로그를 순서대로 적용했다.
+탭 레이아웃에는 AND의 측정 safe-area inset, 플랫폼 weight module, focus remount key와 M의
+Home · Shadow · Speaking · Write · Me 순서, 숨은 Practice/Review, Router 56 접근성 상태를 모두
+남겼다. `videos.tsx`의 버튼·segment·카드·보조 텍스트는 `useTheme()` 의미 토큰으로 바꿨다.
+Home은 summary API 오류에도 허브를 렌더하며, due 값을 모를 때 거짓 `0 due` 대신 일반 Review
+CTA와 오류 상태를 표시한다.
+
+최종 정적 감사 출력은 다음과 같다.
+
+```text
+visible=index,videos,sparring,compose,settings
+hidden=practice,review
+practiceCount=15
+missing=[]
+composeRoot=false
+clipPlayerRoute=true
+rawColorCount=0
+homeHubSurvivesSummaryError=true
+```
+
+`./node_modules/.bin/tsc --noEmit --pretty false --incremental false`와 `git diff --check`는 stdout
+없이 exit 0이었다. 온라인 Expo Doctor는 다음을 출력했다.
+
+```text
+Running 21 checks on your project...
+21/21 checks passed. No issues detected!
+```
+
+현재 HEAD의 production export는 양쪽 모두 exit 0이었다.
+
+```text
+iOS Bundled 28701ms node_modules/expo-router/entry.js (1654 modules)
+Android Bundled 28714ms node_modules/expo-router/entry.js (1746 modules)
+ios_assets=23 ios_ttf=0
+android_assets=29 android_ttf=3
+prod_url_matches=1 missing_env_error_matches=0
+```
+
+격리 worktree에서 JDK 17, SDK 36, `NODE_ENV=production`, production API URL을 명시한 최종
+Android 패키징은 다음을 출력했다.
+
+```text
+BUILD SUCCESSFUL in 19s
+614 actionable tasks: 63 executed, 551 up-to-date
+Performing Streamed Install
+Success
+Status: ok
+LaunchState: COLD
+```
+
+최종 APK는 110,166,674 bytes, SHA-256
+`5cc73af549c5d95e2eb83c8d4f95a2c84a2ebe773b9be43ea9683b3c5ae0fb73`이며 `apksigner`는
+`Verifies`와 v2 `true`를 출력했다. AAB는 76,827,468 bytes, SHA-256
+`689ee376e00b6b17cda5e098d772bb9cd76894e1838bf02a75f2821f37e5c98a`이며 ZIP 검사는 오류 0,
+`jarsigner`는 `jar verified`를 출력했다. 생성된 release 설정은 여전히 debug keystore를 사용한다.
+
+최종 APK에서 light와 dark 각각 다섯 탭을 순서대로 눌렀고, 두 번 모두 각 항목이
+`selected=true`, 대응 화면이 `screen=true`였다. Home Review 카드는 `Review`와 `1 / 6`을,
+Practice 타일은 기존 팩 그리드를 열었다. Shadow의 Clips 목록에서 player까지 이동했고 Play
+클릭 뒤 접근성 상태가 `▶ Play`에서 `⏸ Pause`로 바뀌었다. 자격 증명은 입력하지 않았고 기존
+인증 세션을 사용했다.
+
+첫 APK 설치 시 오래 실행된 emulator의 package manager가 응답하지 않아 `install -r`과
+`pm path`가 함께 멈췄다. ADB만 재시작해도 반복됐고 재부팅 뒤에는 `Service package: not found`였다.
+해당 emulator 프로세스를 정상 종료하고 같은 임시 datadir를 wipe 없이 cold boot하자
+`sys.boot_completed=1`, `Service package: found`가 되었고 이후 설치가 성공했다.
+
+iOS native compilation/device interaction, Android physical device, 실제 마이크 대화와 청각적
+오디오 출력, production signing, Play Console acceptance는 [unverified]다. summary API 실패
+상태의 Home 보존은 정적 분기 감사까지 확인했고 실제 네트워크 오류 UI는 [unverified]다.
+
+**Commits.** `a0ba0a2` (M integration), `dfba4e5` (Shadow theme tokens), `dd3a7a3` (Home hub error reachability).
+
+**Pattern.** 독립 트랙의 빌드 성공은 통합 성공이 아니다. 구조 충돌뿐 아니라 플랫폼별 asset
+선택, 승격 화면의 테마 부채, 새 정보구조가 API 오류에서 끊기는 경로까지 같은 통합 수용
+검사로 묶어야 한다.
+
+---
+
+## 2026-07-16 — STORE-iOS 감사에서 최신 메뉴와 제출 바이너리·외부 TestFlight·스토어 메타가 서로 달랐음
+
+**Symptom.** App Store Connect 읽기 전용 조회에서 공개 버전과 최신 처리 빌드는 다음처럼
+서로 다른 세대였다.
+
+```text
+"version": "1.0",
+"state": "READY_FOR_SALE",
+"build": "11",
+"buildState": "VALID"
+
+"build": "22",
+"state": "VALID",
+"uploaded": "2026-07-15T10:54:35-07:00",
+"expired": false
+```
+
+build 22의 TestFlight 상세와 Friends 그룹 조회는 다음을 출력했다.
+
+```text
+"internalBuildState": "IN_BETA_TESTING",
+"externalBuildState": "READY_FOR_BETA_SUBMISSION"
+
+"builds": [
+  { "build": "11", "state": "VALID" },
+  { "build": "9", "state": "VALID" },
+  { "build": "7", "state": "VALID" }
+]
+```
+
+**Cause (verified).** build 22 업로드는 2026-07-15였지만 5탭 메뉴 커밋 `a0ba0a2`의
+커밋 시각은 `2026-07-16T02:24:08-04:00`이었다. 따라서 build 22는 현재 메뉴를 포함할 수
+없다. ASC에는 1.1.0 App Store 버전 레코드가 없었고, HANDOFF가 있다고 적은
+`mobile/APP_STORE_REVIEW.md`와 `app-store-screenshots/`도 Git tracked tree에 없었다. 기존
+지원 페이지는 `Every feature is free to use`라고 했지만 모바일은 AI 대화·채점을
+invite/server entitlement로 제한했고, 개인정보 문서는 실제 OpenAI/Groq 음성 경로를
+누락했다.
+
+**Fix.** `mobile/APP_STORE_REVIEW.md`에 읽기 전용 ASC 스냅샷, 리뷰 노트, 한/영 스토어
+설명·What's New, URL, 권한, App Privacy 대조표, 새 스크린샷 규격과 오너 입력을 정리했다.
+`frontend/app/[locale]/support/page.tsx`는 all-free 단언과 구 메뉴 스크린샷 투어를 제거하고
+현재 Shadowing 탭·AI 접근 모델을 반영했다. `frontend/app/[locale]/privacy/page.tsx`는 실제
+OpenAI/Groq/Gemini/Claude 처리와 마이크 업로드 조건을 반영했다. EAS build/submit,
+TestFlight 그룹 변경, App Review 제출·공개는 실행하지 않았고 `mobile/eas.json`도 수정하지
+않았다.
+
+검증 출력은 다음과 같다.
+
+```text
+support_http=200
+privacy_http=200
+support_new_copy=present
+support_old_all_free=absent
+support_old_screenshot_tour=absent
+privacy_openai=present
+privacy_groq=present
+privacy_microphone=present
+```
+
+Frontend production build는 `✓ Compiled successfully`, `Finished TypeScript`, 148개 static page
+생성을 출력하고 exit 0이었다. ESLint도 exit 0이었지만 기존 `react-hooks/set-state-in-effect`
+경고 13개는 남았다. 동일 베이스 모바일 `npx tsc --noEmit`은 stdout 없이 exit 0이었다.
+
+**Commit.** `c0533cbd6c6cc9d7855c2e1ae7e54611afaa47ec`.
+
+**Pattern.** App Store 준비는 `VALID` 한 줄로 끝나지 않는다. 제출할 Git 커밋 시각,
+App Store 버전의 attached build, TestFlight 외부 그룹 build 목록, 메타데이터 세대를 각각
+읽어서 같은 릴리스인지 대조해야 한다.
+---
+
+## 2026-07-16 — Google Play 준비 설정은 release manifest와 서명 경계를 따로 검증해야 함
+
+**Symptom.** Android store 준비 검토에서 이전 생성 manifest에 앱 기능과 무관한 storage 권한과
+`SYSTEM_ALERT_WINDOW`가 포함될 수 있었고, 기본 JVM 환경의 release manifest task는 다음처럼
+실패했다.
+
+```text
+Class org.gradle.jvm.toolchain.JvmVendorSpec does not have member field 'org.gradle.jvm.toolchain.JvmVendorSpec IBM_SEMERU'
+BUILD FAILED in 6s
+```
+
+**Cause (verified).** 설치된 React Native의
+`mobile/node_modules/react-native/ReactAndroid/src/debug/AndroidManifest.xml`이
+`SYSTEM_ALERT_WINDOW`를 선언한다. 첫 Gradle 호출은 `JAVA_HOME`을 명시하지 않았고, 같은 task에
+JDK 17과 Android SDK를 명시하자 exit 0이었다. Play App Signing과 EAS upload key는 별개이며,
+읽기 전용 EAS credentials 화면에는 remote JKS가 있지만 Play Store submission service account는
+`None assigned yet`로 표시됐다.
+
+**Fix.** `mobile/app.json`은 불필요한 storage 두 권한과 overlay 권한을 `blockedPermissions`로
+제거한다. `mobile/eas.json`은 production Android 산출물을 AAB로, 제출 기본값을 internal/draft로
+제한한다. `mobile/.gitignore`는 keystore와 Play service-account 파일명을 제외하고,
+`docs/android-store-readiness.md`는 owner gate, Data safety 초안, 서명 경계, 자산과 검증 절차를
+기록한다.
+
+로컬 검증 출력은 다음과 같다.
+
+```text
+JSON_PARSE_OK
+{
+  "buildType": "app-bundle",
+  "track": "internal",
+  "releaseStatus": "draft"
+}
+package="ai.daeseon.mimi"
+android:targetSdkVersion="36"
+android.permission.MODIFY_AUDIO_SETTINGS
+android.permission.RECORD_AUDIO
+```
+
+TypeScript, whitespace 검사와 JDK 17 release manifest task는 exit 0이었다. merged release
+manifest에는 차단한 `READ_EXTERNAL_STORAGE`, `WRITE_EXTERNAL_STORAGE`, `SYSTEM_ALERT_WINDOW`가
+없었다. 실제 production AAB, Play Console 등록·인증서 대조, 정책 설문, Android store 자산과
+실기기 검증은 [unverified]다.
+
+**Commit.** `c9fb5aed7dd5343200a199eb288f00fd6e12b476`.
+
+**Pattern.** EAS에 upload keystore가 있다는 사실은 Play App Signing 연결이나 제출 준비 완료를
+의미하지 않는다. 소스 설정, merged manifest, AAB 서명, Console 인증서를 각각 검증해야 한다.
+
+---
+
+## 2026-07-16 — 규격이 맞는 스크린샷도 시각 검수 없이 제출 후보가 될 수 없음
+
+**Symptom.** 네 iPhone 캡처는 모두 1320×2868이었지만 `02-practice.png`는 숨은 Practice
+route에서 Home 하나와 잘린 center-tab bump만 보이는 불완전한 탭바를 담았다.
+`04-import.png`는 큰 빈 blue/top 영역 때문에 store image 구성이 불균형했다.
+
+**Cause (verified).** 파일별 `sips` 조회는 네 장 모두 `pixelWidth: 1320`,
+`pixelHeight: 2868`을 출력했다. 실제 이미지 시각 검수에서는 `01-home.png`와 `03-write.png`의
+현재 5탭 구조는 온전히 보였고, `02-practice.png`와 `04-import.png`에는 위 문제가 보였다.
+해상도 통과는 navigation 완전성이나 구도 품질을 검증하지 않는다.
+
+**Fix.** 이미지는 진단 자료로 보존한다. `mobile/APP_STORE_REVIEW.md`는 Home과 Write만 후보로
+남기고 Practice와 Import를 제출 후보에서 제외했으며, 완전한 navigation과 균형 잡힌 구도로
+재촬영해야 한다고 기록한다.
+
+실제 제출 archive와 동일한 build에서의 재촬영, Shadow의 권리 확인된 캡처, iPad와 한국어
+세트, 오너의 최종 시각 승인은 [unverified]다.
+
+**Commit.** `285d54b77f220cbda2e357f2afa1d75424f0fe2e`.
+
+**Pattern.** App Store pixel 규격 검사는 필요조건이다. 실제 route chrome, 개인정보, 권리,
+카피와 구도는 별도 visual gate로 검수해야 한다.
+
+---
+
+## 2026-07-16 — STORE 브랜치 통합은 clean install·native package·서명 경계를 다시 확인해야 함
+
+**Symptom.** STORE-iOS와 STORE-Android를 통합한 첫 frontend lint는 worktree에 의존성이 없어
+다음처럼 실패했다.
+
+```text
+sh: eslint: command not found
+npm error code 127
+```
+
+lockfile clean install은 다음을 출력했고 production-only audit은 별도 실패 상태였다.
+
+```text
+added 765 packages, and audited 769 packages in 2m
+5 vulnerabilities (2 moderate, 3 high)
+
+npm audit --omit=dev --json
+moderate: 2
+high: 1
+critical: 0
+```
+
+**Cause (verified).** 통합 worktree에는 `frontend/node_modules`와 root `node_modules`가 없었다.
+`npm ci` 뒤 `npm ls`는 high advisory 경로를
+`shadcn -> @modelcontextprotocol/sdk -> hono@4.12.22`로, moderate 경로를
+`next@16.2.6 -> postcss@8.4.31`로 출력했다. 자동 audit fix는 Next 9.3.3 major downgrade를
+제안했다. Android generated `build.gradle`은 release에도 `signingConfigs.debug`를 사용했고,
+로컬 APK SHA-1은 EAS production upload SHA-1과 달랐다.
+
+**Fix.** 기존 lockfile을 `npm ci`로 재현하고 dependency 자동 수정은 하지 않았다.
+`docs/android-store-readiness.md`는 mobile-only audit과 통합 root audit을 분리하고, 로컬
+debug-signed 산출물을 production 업로드 후보와 구분했다. `mobile/app.json`의
+`blockedPermissions`는 storage 두 권한과 `SYSTEM_ALERT_WINDOW`를 release manifest에서 제거한다.
+
+통합 HEAD 검증 출력은 다음과 같다.
+
+```text
+visible=index,videos,sparring,compose,settings
+hidden=practice,review
+practiceCount=15
+missing=[]
+mobile tsc exit=0
+frontend lint: 0 errors, 13 warnings, exit=0
+frontend build: 148/148 static pages, exit=0
+iOS Bundled 10676ms (1654 modules)
+Android Bundled 10591ms (1746 modules)
+BUILD SUCCESSFUL in 3m 24s
+662 actionable tasks: 634 executed, 28 up-to-date
+```
+
+최종 APK는 package `ai.daeseon.mimi`, version `1.1.0`, target SDK 36이고 차단 권한 3개가
+없다. 110,166,622 bytes, SHA-256
+`b62983911d2cc73f508ca40b6e5a6143504b6e610ab48490c9923d4912c2ffb0`이며 APK Signature
+Scheme v2 검증을 통과했다. AAB는 76,827,390 bytes, SHA-256
+`70c55ea82026b06a6d8718bf044a6565eca1986b6e4ea29ad477c5a6a9985310`이며 ZIP 오류 0과
+`jar verified`를 출력했다. 두 산출물은 debug keystore 서명이다.
+
+실행 중 Android device가 없어 최종 APK UI 재설치는 [unverified]다. production-signed AAB,
+Play Console, account-deletion web flow, Android store graphics, iOS native archive와 실제 제출도
+[unverified]다.
+
+**Commit.** `574e9691daaa8e29e1a8e523fd3504811a3f5094`.
+
+**Pattern.** 통합 후보의 compile 성공, store upload readiness, production signing은 서로 다른
+검증 수준이다. 같은 결과로 합쳐 표현하지 않는다.

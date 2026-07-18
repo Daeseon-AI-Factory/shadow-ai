@@ -62,10 +62,15 @@ public final class SparringPrompt {
         sb.append("""
 
                 # Secret coaching goal (never announce it)
-                Steer the conversation so the learner gets natural openings to use these target expressions.
-                Use them casually yourself, ask questions whose natural answers would use them, and when the
-                learner uses one, react naturally — do NOT quiz, list them, or say "now use X".
-                Targets:
+                Below are target expressions the learner is practicing. Do NOT force all of them into one
+                chat. Pick the ones that fit ONE natural conversation thread and weave in only as many of
+                THOSE as flow comfortably — 3-4 landing naturally is a great session; leave the rest for
+                another time (they carry over). A chat where a few RELATED expressions land smoothly beats
+                one where unrelated ones are crammed in awkwardly. Follow the learner's own topic when you
+                can, and only steer toward targets that fit it. Use them casually yourself, ask questions
+                whose natural answers would use them, and when the learner uses one, react naturally —
+                never quiz, list them, or say "now use X".
+                Targets (use the subset that fits; ignore the rest):
                 """);
         for (Target t : targets) {
             sb.append("- ").append(t.label());

@@ -7,6 +7,7 @@ import { ENGLISH_PATTERNS, PHRASAL_500, IT_PATTERNS, IT_TERMS, practiceApi } fro
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { Fonts } from '@/constants/theme';
 import { useAuthStore } from '@/lib/auth-store';
 import { t } from '@/lib/i18n';
 
@@ -113,7 +114,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 12,
   },
-  chipText: { fontSize: 13, fontFamily: 'Menlo' },
+  chipText: { fontSize: 13, fontFamily: Fonts.mono },
   resultBox: {
     borderRadius: 12,
     borderWidth: 1,

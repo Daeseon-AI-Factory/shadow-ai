@@ -22,6 +22,7 @@ import { RecordPanel } from '@/components/record-panel';
 import { ScenarioQuiz } from '@/components/scenario-quiz';
 import { ErrorState } from '@/components/error-state';
 import { Skeleton, SkeletonCards } from '@/components/skeleton';
+import { Fonts } from '@/constants/theme';
 import { useAuthStore } from '@/lib/auth-store';
 import { setLastClip } from '@/lib/last-clip';
 import { t } from '@/lib/i18n';
@@ -509,5 +510,5 @@ const styles = StyleSheet.create({
   },
   bold: { fontWeight: '700' },
   chunkRow: { gap: 1, marginBottom: 4 },
-  chunkEn: { fontFamily: 'Menlo' },
+  chunkEn: { fontFamily: Fonts.mono },
 });

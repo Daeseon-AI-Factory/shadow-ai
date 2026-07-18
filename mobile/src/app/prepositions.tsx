@@ -11,6 +11,7 @@ import {
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { Fonts } from '@/constants/theme';
 import { useAuthStore } from '@/lib/auth-store';
 import { t } from '@/lib/i18n';
 
@@ -107,6 +108,6 @@ const styles = StyleSheet.create({
   senseLabel: { fontWeight: '600' },
   archetype: { backgroundColor: '#208AEF22', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 1 },
   archetypeText: { fontSize: 10, color: '#1d4ed8', fontWeight: '700', textTransform: 'uppercase' },
-  example: { fontFamily: 'Menlo', fontSize: 15 },
+  example: { fontFamily: Fonts.mono, fontSize: 15 },
   minedHeader: { marginTop: 12 },
 });

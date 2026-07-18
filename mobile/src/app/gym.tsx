@@ -24,6 +24,7 @@ import {
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { DrillRunner, type DrillItem } from '@/components/drill-runner';
+import { Fonts } from '@/constants/theme';
 import { useAuthStore } from '@/lib/auth-store';
 import { t } from '@/lib/i18n';
 
@@ -226,7 +227,7 @@ const styles = StyleSheet.create({
     padding: 16,
     gap: 4,
   },
-  base: { fontSize: 17, fontFamily: 'Menlo' },
+  base: { fontSize: 17, fontFamily: Fonts.mono },
   toggle: {
     alignSelf: 'flex-start',
     borderRadius: 999,

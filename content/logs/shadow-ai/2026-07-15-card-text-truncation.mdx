@@ -1,0 +1,36 @@
+---
+title: "Cards were truncating their labels; make them grow to fit instead"
+date: "2026-07-15"
+project: "shadow-ai"
+kind: "ux-retro"
+visibility: "public"
+language: "en"
+summary: "Practice pack cards and Home tiles capped text at two lines, clipping labels mid-word — worsened once U4 added a mastery block to the pack cards. Removed the line caps so cards grow to fit and row siblings match height."
+tags: ["ux", "react-native", "layout"]
+---
+
+## Symptom
+
+Testing build 21, the owner reported: card labels on the Practice grid (and Home tiles) were cut off
+with an ellipsis.
+
+## Cause
+
+`ToolCard` (`practice.tsx`) and `HomeTile` (`index.tsx`) both set `numberOfLines={2}` on the title and
+the meta line. That was survivable before, but U4 added a mastery block (`익힘 N/M` + a progress bar) to
+each pack card, eating vertical space — so two lines no longer fit the label, and at larger Dynamic Type
+sizes even short labels clipped.
+
+## Fix
+
+Removed the `numberOfLines={2}` caps on both card grids. The cards already use `minHeight` (not a fixed
+height), so they grow with content, and their row containers default to `alignItems: 'stretch'`, so cards
+in the same row match the tallest one. Result: labels wrap fully, nothing is clipped, and rows stay even.
+`npx tsc --noEmit` exit 0.
+
+## Pattern
+
+A fixed `numberOfLines` on a variable-length label inside a min-height card is a latent truncation bug: it
+looks fine until content grows (an added row, a longer string, a bigger accessibility font). For adaptive
+cards, drop the line cap and let the card size to its content — the `alignItems: stretch` default keeps
+the grid tidy without a hard clip.

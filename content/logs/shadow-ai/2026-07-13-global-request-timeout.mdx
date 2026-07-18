@@ -1,0 +1,44 @@
+---
+title: "공용 API 요청에 15초 deadline 추가"
+date: "2026-07-13"
+project: "shadow-ai"
+kind: "troubleshoot"
+visibility: "public"
+language: "ko"
+summary: "공용 fetch client에 일반 요청 15초, FormData 60초 상한을 추가하고 caller 취소와 timeout을 구분했다. 공용 client를 우회하는 legacy 음성 업로드는 이번 범위에 포함되지 않는다."
+tags: ["reliability", "timeout", "mobile"]
+---
+
+## 문제
+
+`packages/core/src/api/client.ts`의 `apiRequest()`는 웹과 모바일이 함께 쓰는 공용 요청
+choke point지만, 기존에는 caller가 직접 `AbortSignal`을 주지 않으면 종료 조건이 없었다.
+백엔드가 연결만 잡고 응답하지 않는 경우 화면 spinner도 끝나지 않을 수 있는 구조였다.
+
+## 변경
+
+- 일반 JSON 요청 기본 deadline: 15초
+- `FormData` 업로드 기본 deadline: 60초
+- 호출별 override: `timeoutMs`
+- caller abort는 그대로 caller abort로 전달
+- 내부 timer가 abort한 경우에만 `ApiError(408, "TIMEOUT")`
+- 성공·실패 모두 timer와 caller listener 정리
+
+`AbortSignal.any()`에 기대지 않고 수동으로 caller signal을 전달했다. 요청이 정상 종료될 때도
+listener를 확실히 제거하기 위해서다.
+
+## 검증
+
+loopback 서버로 정상 응답, 무응답, 느린 multipart 응답을 실제 실행했다.
+
+```text
+{"normal":"ok","timeout":{"status":408,"code":"TIMEOUT","elapsedMs":15160},"formData":{"result":"ok","elapsedMs":15758}}
+```
+
+기존 API client Vitest 6개와 mobile TypeScript 검사도 통과했다. 구현 커밋은 `efcd7fe`다.
+
+## 범위 제한
+
+`mobile/src/components/mic-input.tsx`의 `expo-file-system/legacy.uploadAsync()`는 이 client를
+우회한다. 사용자가 지정한 Track A 허용 파일 밖이어서 수정하지 않았고, 그 직접 업로드에는
+이번 deadline이 적용되지 않는다.

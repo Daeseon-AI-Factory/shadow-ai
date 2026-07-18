@@ -5,9 +5,15 @@ import com.tubeshadow.analysis.infrastructure.AiAnalysisClient;
 import com.tubeshadow.common.exception.BusinessException;
 import com.tubeshadow.practice.api.dto.ComposeFeedback;
 import com.tubeshadow.practice.api.dto.MixResponse;
+import com.tubeshadow.practice.api.dto.MockNextResponse;
 import com.tubeshadow.practice.api.dto.StoryResponse;
+import com.tubeshadow.practice.api.dto.SparringReportRequest;
+import com.tubeshadow.practice.api.dto.SparringReportResponse;
 import com.tubeshadow.practice.application.CompositionService;
+import com.tubeshadow.practice.prompt.SparringReportPrompt;
+import com.tubeshadow.practice.prompt.MockInterviewPrompt;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.List;
 
@@ -15,6 +21,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -136,5 +143,109 @@ class CompositionServiceTest {
         when(ai.complete(anyString(), anyString(), anyInt())).thenReturn("{\"story\":\"\"}");
 
         assertThatThrownBy(() -> service.story(List.of("a", "b", "c"))).isInstanceOf(BusinessException.class);
+    }
+
+    @Test
+    void sparringReportMapsStrictTargetPartitionBackToClientKeys() {
+        when(ai.isConfigured()).thenReturn(true);
+        when(ai.complete(anyString(), anyString(), anyInt())).thenReturn("""
+                {
+                  "usedTargets": ["t1"],
+                  "missedTargets": ["t2"],
+                  "corrections": [
+                    {"original":"I explained him the issue.","corrected":"I explained the issue to him.","explanation":"Use explain something to someone."}
+                  ],
+                  "recurringMistakes": ["Missing articles before singular nouns"]
+                }
+                """);
+        List<SparringReportRequest.Target> targets = List.of(
+                new SparringReportRequest.Target("verb:figure-out", "figure out", "알아내다"),
+                new SparringReportRequest.Target("collocation:trade-off", "make a trade-off", "절충하다"));
+
+        SparringReportResponse report = service.sparringReport(
+                List.of("I figured out the race condition.", "I explained him the issue."), targets);
+
+        assertThat(report.usedTargets()).extracting(SparringReportResponse.Target::cardKey)
+                .containsExactly("verb:figure-out");
+        assertThat(report.missedTargets()).extracting(SparringReportResponse.Target::cardKey)
+                .containsExactly("collocation:trade-off");
+        assertThat(report.corrections()).singleElement().satisfies(correction -> {
+            assertThat(correction.original()).isEqualTo("I explained him the issue.");
+            assertThat(correction.corrected()).isEqualTo("I explained the issue to him.");
+        });
+        assertThat(report.recurringMistakes()).containsExactly("Missing articles before singular nouns");
+        verify(ai).complete(eq(SparringReportPrompt.SYSTEM), anyString(), eq(800));
+    }
+
+    @Test
+    void sparringReportRejectsAnIncompleteTargetPartition() {
+        when(ai.isConfigured()).thenReturn(true);
+        when(ai.complete(anyString(), anyString(), anyInt())).thenReturn("""
+                {"usedTargets":["t1"],"missedTargets":[],"corrections":[],"recurringMistakes":[]}
+                """);
+        List<SparringReportRequest.Target> targets = List.of(
+                new SparringReportRequest.Target("one", "figure out", null),
+                new SparringReportRequest.Target("two", "end up", null));
+
+        assertThatThrownBy(() -> service.sparringReport(List.of("I figured it out."), targets))
+                .isInstanceOf(BusinessException.class);
+    }
+
+    @Test
+    void sparringReportDoesNotCallProviderWhenAiIsMissing() {
+        when(ai.isConfigured()).thenReturn(false);
+
+        assertThatThrownBy(() -> service.sparringReport(
+                List.of("A learner turn."),
+                List.of(new SparringReportRequest.Target("one", "figure out", null))))
+                .isInstanceOf(BusinessException.class);
+        verify(ai, never()).complete(anyString(), anyString(), anyInt());
+    }
+
+    @Test
+    void sparringReportClassifiesDuplicateLabelsOnceAndMapsEveryClientKeyTogether() {
+        when(ai.isConfigured()).thenReturn(true);
+        when(ai.complete(anyString(), anyString(), anyInt())).thenReturn("""
+                {"usedTargets":["t1"],"missedTargets":[],"corrections":[],"recurringMistakes":[]}
+                """);
+        List<SparringReportRequest.Target> targets = List.of(
+                new SparringReportRequest.Target("collocation:agree-with:0", "agree with", "동의하다"),
+                new SparringReportRequest.Target("collocation:agree-with:1", " Agree   With ", "동의하다"));
+
+        SparringReportResponse report = service.sparringReport(List.of("I agree with that."), targets);
+
+        assertThat(report.usedTargets()).extracting(SparringReportResponse.Target::cardKey)
+                .containsExactly("collocation:agree-with:0", "collocation:agree-with:1");
+        assertThat(report.missedTargets()).isEmpty();
+        ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
+        verify(ai).complete(eq(SparringReportPrompt.SYSTEM), prompt.capture(), eq(800));
+        assertThat(prompt.getValue()).contains("t1 | agree with").doesNotContain("t2 |");
+    }
+
+    @Test
+    void mockInterviewThreadsTheJobDescriptionIntoTheUserPrompt() {
+        when(ai.isConfigured()).thenReturn(true);
+        when(ai.complete(anyString(), anyString())).thenReturn(
+                "{\"question\":\"How would you make a Kotlin service idempotent?\"}");
+
+        MockNextResponse response = service.mockNext(
+                List.of(), 42L, "Backend engineer: Kotlin, queues, and idempotent APIs.");
+
+        assertThat(response.question()).isEqualTo("How would you make a Kotlin service idempotent?");
+        ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
+        verify(ai).complete(eq(MockInterviewPrompt.SYSTEM), prompt.capture());
+        assertThat(prompt.getValue()).contains(
+                "The role:",
+                "Backend engineer: Kotlin, queues, and idempotent APIs.",
+                "Session seed: 42");
+    }
+
+    @Test
+    void mockInterviewStillRejectsAnEmptyQuestion() {
+        when(ai.isConfigured()).thenReturn(true);
+        when(ai.complete(anyString(), anyString())).thenReturn("{\"question\":\"\"}");
+
+        assertThatThrownBy(() -> service.mockNext(List.of(), 42L, null))
+                .isInstanceOf(BusinessException.class);
     }
 }

@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -11,19 +11,22 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Redirect, router } from 'expo-router';
+import { Redirect, router, useFocusEffect } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { clipsApi, libraryApi, type ClipResponse, type LibraryVideoResponse } from '@shadow-ai/core';
+import { ApiError, clipsApi, libraryApi, type ClipResponse, type LibraryVideoResponse } from '@shadow-ai/core';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { EmptyState } from '@/components/empty-state';
 import { ErrorState } from '@/components/error-state';
 import { SkeletonCards } from '@/components/skeleton';
+import { pressableRipple, pressableStyle, useTheme } from '@/hooks/use-theme';
 import { useAuthStore } from '@/lib/auth-store';
 import { t } from '@/lib/i18n';
 
 type LibrarySection = 'videos' | 'clips';
+const ALERT_REOPEN_DELAY_MS = 350;
+type RemoveAttempt = { videoId: string; focusGeneration: number };
 
 function ms(msVal: number) {
   const s = Math.round(msVal / 1000);
@@ -32,9 +35,16 @@ function ms(msVal: number) {
 
 export default function VideosScreen() {
   const token = useAuthStore((s) => s.token);
+  const theme = useTheme();
   const qc = useQueryClient();
   const [section, setSection] = useState<LibrarySection>('videos');
   const [clipQuery, setClipQuery] = useState('');
+  const [feedbackPending, setFeedbackPending] = useState(false);
+  const removingRef = useRef(false);
+  const feedbackActiveRef = useRef(false);
+  const focusGenerationRef = useRef(0);
+  const feedbackPendingRef = useRef(false);
+  const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const videos = useQuery({
     queryKey: ['library', 'videos'],
@@ -48,20 +58,100 @@ export default function VideosScreen() {
     enabled: !!token && section === 'clips',
   });
 
+  useFocusEffect(
+    useCallback(() => {
+      focusGenerationRef.current += 1;
+      feedbackActiveRef.current = true;
+      feedbackPendingRef.current = false;
+      setFeedbackPending(false);
+      return () => {
+        feedbackActiveRef.current = false;
+        focusGenerationRef.current += 1;
+        if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+        feedbackTimerRef.current = null;
+        feedbackPendingRef.current = false;
+      };
+    }, []),
+  );
+
+  const releaseRemoveFeedback = () => {
+    if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+    feedbackTimerRef.current = null;
+    feedbackPendingRef.current = false;
+    if (feedbackActiveRef.current) setFeedbackPending(false);
+  };
+
+  const queueRemoveFeedback = (variables: RemoveAttempt) => {
+    if (
+      !feedbackActiveRef.current ||
+      variables.focusGeneration !== focusGenerationRef.current
+    ) return;
+    feedbackPendingRef.current = true;
+    setFeedbackPending(true);
+    if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+    const feedbackTimer = setTimeout(() => {
+      if (feedbackTimerRef.current !== feedbackTimer) return;
+      feedbackTimerRef.current = null;
+      if (
+        !feedbackActiveRef.current ||
+        variables.focusGeneration !== focusGenerationRef.current
+      ) return;
+      Alert.alert(
+        t('feedback.videoDeleteFailedTitle'),
+        t('feedback.videoDeleteFailedMessage'),
+        [
+          { text: t('common.cancel'), style: 'cancel', onPress: releaseRemoveFeedback },
+          {
+            text: t('common.retry'),
+            onPress: () => {
+              releaseRemoveFeedback();
+              if (!feedbackActiveRef.current) return;
+              submitRemove(variables);
+            },
+          },
+        ],
+        { cancelable: true, onDismiss: releaseRemoveFeedback },
+      );
+    }, ALERT_REOPEN_DELAY_MS);
+    feedbackTimerRef.current = feedbackTimer;
+  };
+
   const remove = useMutation({
-    mutationFn: (videoId: string) => libraryApi.remove(videoId),
+    mutationFn: ({ videoId }: RemoveAttempt) => libraryApi.remove(videoId),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['library', 'videos'] }),
+    onError: (error, variables) => {
+      if (error instanceof ApiError && error.status === 401) return;
+      queueRemoveFeedback(variables);
+    },
+    onSettled: () => {
+      removingRef.current = false;
+    },
   });
 
-  const confirmRemove = useCallback(
-    (item: LibraryVideoResponse) => {
-      Alert.alert(t('videos.removeTitle'), item.video.title, [
-        { text: t('library.cancel'), style: 'cancel' },
-        { text: t('library.delete'), style: 'destructive', onPress: () => remove.mutate(item.video.id) },
-      ]);
-    },
-    [remove],
-  );
+  const submitRemove = (variables: RemoveAttempt) => {
+    if (
+      !feedbackActiveRef.current ||
+      variables.focusGeneration !== focusGenerationRef.current ||
+      removingRef.current ||
+      feedbackPendingRef.current
+    ) return;
+    removingRef.current = true;
+    remove.mutate(variables);
+  };
+
+  const confirmRemove = (item: LibraryVideoResponse) => {
+    Alert.alert(t('videos.removeTitle'), item.video.title, [
+      { text: t('library.cancel'), style: 'cancel' },
+      {
+        text: t('library.delete'),
+        style: 'destructive',
+        onPress: () => submitRemove({
+          videoId: item.video.id,
+          focusGeneration: focusGenerationRef.current,
+        }),
+      },
+    ]);
+  };
 
   if (!token) return <Redirect href="/login" />;
 
@@ -73,14 +163,17 @@ export default function VideosScreen() {
       <SafeAreaView style={styles.flex} edges={['bottom']}>
         <View style={styles.header}>
           <Pressable
-            style={styles.importBtn}
+            style={pressableStyle([styles.importBtn, { backgroundColor: theme.primary }])}
+            android_ripple={pressableRipple}
             onPress={() => router.push('/import')}
             accessibilityRole="button"
             accessibilityLabel={t('videos.import')}
           >
-            <ThemedText style={styles.importText}>＋ {t('videos.import')}</ThemedText>
+            <ThemedText style={[styles.importText, { color: theme.onPrimary }]}>
+              ＋ {t('videos.import')}
+            </ThemedText>
           </Pressable>
-          <View style={styles.segment}>
+          <View style={[styles.segment, { borderColor: theme.border }]}>
             <SegmentButton
               label={t('library.videosTab')}
               active={section === 'videos'}
@@ -119,7 +212,12 @@ export default function VideosScreen() {
             }
             renderItem={({ item }) => (
               <Pressable
-                style={styles.card}
+                style={pressableStyle([
+                  styles.card,
+                  { backgroundColor: theme.backgroundElement, borderColor: theme.border },
+                ])}
+                android_ripple={pressableRipple}
+                disabled={remove.isPending || feedbackPending}
                 onPress={() => router.push(`/video/${item.video.id}`)}
                 onLongPress={() => confirmRemove(item)}
                 accessibilityRole="button"
@@ -128,18 +226,18 @@ export default function VideosScreen() {
                 {item.video.thumbnailUrl ? (
                   <Image source={{ uri: item.video.thumbnailUrl }} style={styles.thumb} />
                 ) : (
-                  <View style={[styles.thumb, styles.thumbPlaceholder]} />
+                  <View style={[styles.thumb, { backgroundColor: theme.backgroundSelected }]} />
                 )}
                 <View style={styles.cardBody}>
                   <ThemedText type="smallBold" numberOfLines={2}>
                     {item.video.title}
                   </ThemedText>
                   {item.video.channelName ? (
-                    <ThemedText type="small" numberOfLines={1} style={styles.muted}>
+                    <ThemedText type="small" numberOfLines={1} style={{ color: theme.textSecondary }}>
                       {item.video.channelName}
                     </ThemedText>
                   ) : null}
-                  <ThemedText type="small" style={styles.muted}>
+                  <ThemedText type="small" style={{ color: theme.textSecondary }}>
                     {t('videos.clipCount', { count: item.clipCount })}
                   </ThemedText>
                 </View>
@@ -170,15 +268,28 @@ function SegmentButton({
   active: boolean;
   onPress: () => void;
 }) {
+  const theme = useTheme();
+
   return (
     <Pressable
-      style={[styles.segmentItem, active && styles.segmentItemOn]}
+      style={pressableStyle([
+        styles.segmentItem,
+        active && { backgroundColor: theme.primary },
+      ])}
+      android_ripple={pressableRipple}
       onPress={onPress}
       accessibilityRole="button"
       accessibilityState={{ selected: active }}
       accessibilityLabel={label}
     >
-      <ThemedText style={[styles.segmentText, active && styles.segmentTextOn]}>{label}</ThemedText>
+      <ThemedText
+        style={[
+          styles.segmentText,
+          { color: active ? theme.onPrimary : theme.textSecondary },
+        ]}
+      >
+        {label}
+      </ThemedText>
     </Pressable>
   );
 }
@@ -202,15 +313,25 @@ function ClipsPane({
   error: unknown;
   onRefresh: () => void;
 }) {
+  const theme = useTheme();
+
   if (isPending) return <SkeletonCards />;
   if (isError) return <ErrorState message={(error as Error).message} onRetry={onRefresh} />;
 
   return (
     <>
       <TextInput
-        style={styles.search}
+        style={[
+          styles.search,
+          {
+            color: theme.text,
+            backgroundColor: theme.backgroundElement,
+            borderColor: theme.border,
+          },
+        ]}
         placeholder={t('library.searchPlaceholder')}
-        placeholderTextColor="#9ca3af"
+        placeholderTextColor={theme.textSecondary}
+        selectionColor={theme.primary}
         autoCapitalize="none"
         value={query}
         onChangeText={setQuery}
@@ -243,9 +364,15 @@ function ClipsPane({
 }
 
 function ClipRow({ item }: { item: ClipResponse }) {
+  const theme = useTheme();
+
   return (
     <Pressable
-      style={styles.clipCard}
+      style={pressableStyle([
+        styles.clipCard,
+        { backgroundColor: theme.backgroundElement, borderColor: theme.border },
+      ])}
+      android_ripple={pressableRipple}
       onPress={() => router.push(`/player/${item.id}`)}
       accessibilityRole="button"
       accessibilityLabel={item.name || item.videoTitle}
@@ -263,7 +390,7 @@ function ClipRow({ item }: { item: ClipResponse }) {
           {item.transcript}
         </ThemedText>
       ) : (
-        <ThemedText type="small" style={styles.muted} numberOfLines={1}>
+        <ThemedText type="small" style={{ color: theme.textSecondary }} numberOfLines={1}>
           {item.videoTitle}
         </ThemedText>
       )}
@@ -276,36 +403,29 @@ const styles = StyleSheet.create({
   mt: { marginTop: 24 },
   header: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8, gap: 12 },
   importBtn: {
-    backgroundColor: '#208AEF',
     borderRadius: 10,
     minHeight: 48,
     paddingVertical: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  importText: { color: '#fff', fontWeight: '700' },
+  importText: { fontWeight: '700' },
   segment: {
     flexDirection: 'row',
     borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#9ca3af',
     overflow: 'hidden',
   },
   segmentItem: { flex: 1, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
-  segmentItemOn: { backgroundColor: '#208AEF' },
-  segmentText: { fontWeight: '800', color: '#6b7280' },
-  segmentTextOn: { color: '#fff' },
+  segmentText: { fontWeight: '800' },
   search: {
     marginHorizontal: 16,
     marginBottom: 8,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#9ca3af',
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 10,
     fontSize: 15,
-    color: '#111827',
-    backgroundColor: '#fff',
   },
   list: { padding: 16, gap: 12 },
   card: {
@@ -313,20 +433,16 @@ const styles = StyleSheet.create({
     gap: 12,
     borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#9ca3af',
     minHeight: 88,
     padding: 10,
     alignItems: 'center',
   },
-  thumb: { width: 120, height: 68, borderRadius: 8, backgroundColor: '#e5e7eb' },
-  thumbPlaceholder: { backgroundColor: '#d1d5db' },
+  thumb: { width: 120, height: 68, borderRadius: 8 },
   cardBody: { flex: 1, gap: 3 },
-  muted: { color: '#6b7280' },
   empty: { textAlign: 'center', marginTop: 40, paddingHorizontal: 24 },
   clipCard: {
     borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#9ca3af',
     minHeight: 72,
     padding: 14,
     gap: 6,

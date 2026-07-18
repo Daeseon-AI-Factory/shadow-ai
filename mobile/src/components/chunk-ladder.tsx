@@ -4,6 +4,7 @@ import * as SecureStore from 'expo-secure-store';
 import type { ChunkPair } from '@shadow-ai/core';
 
 import { ThemedText } from '@/components/themed-text';
+import { Fonts } from '@/constants/theme';
 import { haptic } from '@/lib/haptics';
 import { t } from '@/lib/i18n';
 
@@ -251,7 +252,7 @@ const styles = StyleSheet.create({
   },
   slotEmpty: { borderWidth: 1, borderStyle: 'dashed', borderColor: '#9ca3af' },
   slotFilled: { borderWidth: 1, borderColor: '#10b98155', backgroundColor: '#10b98111' },
-  slotEn: { fontFamily: 'Menlo', fontSize: 14 },
+  slotEn: { fontFamily: Fonts.mono, fontSize: 14 },
   slotPlaceholder: { color: '#9ca3af' },
   tray: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: {
@@ -264,7 +265,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   chipWrong: { borderColor: '#dc2626', backgroundColor: '#dc262611' },
-  chipEn: { fontFamily: 'Menlo', fontSize: 14 },
+  chipEn: { fontFamily: Fonts.mono, fontSize: 14 },
   doneRow: { gap: 10 },
   solved: { color: '#059669' },
   btnRow: { flexDirection: 'row', gap: 10 },

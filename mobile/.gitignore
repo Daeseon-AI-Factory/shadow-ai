@@ -13,10 +13,17 @@ expo-env.d.ts
 .kotlin/
 *.orig.*
 *.jks
+*.keystore
 *.p8
 *.p12
 *.key
 *.mobileprovision
+
+# Android signing / Google Play API credentials (never commit these)
+credentials.json
+service-account*.json
+play-service-account*.json
+google-play-service-account*.json
 
 # Metro
 .metro-health-check*

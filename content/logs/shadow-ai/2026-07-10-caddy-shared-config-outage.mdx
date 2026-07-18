@@ -1,0 +1,59 @@
+---
+title: "장애 회고 — 백엔드는 멀쩡한데 앱이 죽었다: 공유 Caddyfile에서 라우팅이 사라진 사건"
+date: "2026-07-10"
+project: "shadow-ai"
+kind: "troubleshoot"
+visibility: "private"
+language: "ko"
+summary: "MiMi 앱이 백엔드에 못 붙었다. 원인은 백엔드도 인증서도 아니고, 여러 프로젝트가 공유하는 Caddy의 활성 Caddyfile에서 api.mimi·api.jjan·beside 사이트 블록이 병렬 세션에 의해 삭제된 것. 블록 복원 + 단일 정본화로 해결."
+tags: ["incident", "caddy", "tls", "infra", "vultr"]
+---
+
+## 무슨 일
+
+이관 다음 날, "앱이 안 된다"는 신고. 확인해보니 `https://api.mimi.daeseon.ai`가
+curl로 5번 다 **HTTP 000** — TLS 핸드셰이크 단계부터 실패(`remote error: tls:
+internal error`). api.jjan·beside도 동일하게 죽어 있었다. docvault·faangforge만 살아있었다.
+
+## 함정 — 백엔드를 의심하게 만든다
+
+처음 든 생각은 "백엔드가 죽었나"였다. 아니었다:
+- `mimi-backend` 컨테이너: **Up 24h (healthy)**
+- 인증서: `/data/caddy/certificates/.../api.mimi.daeseon.ai/`에 crt·key·json **다 있음**
+
+증상이 TLS 실패라 인증서 문제처럼 보였지만, 진짜 원인은 한 층 위였다:
+**활성 Caddyfile에 api.mimi 사이트 블록 자체가 없었다.** Caddy는 매칭되는 site
+block이 없는 SNI 요청을 `internal error`로 끊는다. 그래서 "인증서는 있는데 TLS부터
+실패"라는 헷갈리는 그림이 나온 것.
+
+## 근본 원인
+
+이 Vultr 박스는 **한 Caddy(ds-forge-caddy)를 mimi·jjan·beside·docvault·faangforge가
+공유**한다. 병렬로 돌던 다른 작업 세션이 활성 Caddyfile(`/root/ds-forge/deploy/Caddyfile`)을
+재정리하면서 mimi·jjan·beside 블록을 통째로 떨궜다. 남의 도메인이 조용히 사라진 것.
+
+## 고친 방법 (추측 없이)
+
+1. **업스트림 도달성부터 검증** — `getent hosts jjan-api` → `172.18.0.8`. jjan-api·
+   jjan-game·beside-web·mimi-backend 모두 caddy 네트워크(`ds-forge_default`)에서 해석됨.
+   (jjan-api `/`가 404인 건 API라 정상 — 이걸 "죽음"으로 오판하지 말 것.)
+2. **블록은 원본에서 verbatim 추출** — `api.mimi`는 `mimi-backend:8080`으로 직접,
+   `api.jjan`·`beside`는 원본 `/opt/mimi/Caddyfile`에서 중괄호 균형 맞춰 그대로 복사.
+   `api-ncp.jjan`은 DNS가 **죽은 NCP**를 가리켜 제외(넣으면 ACME 실패 → rate limit).
+3. **validate → reload** 순서 엄수. Caddy는 문법 틀리면 reload를 거부(기존 config 유지)라
+   안전. 백업 남기고 진행.
+4. 검증: api.mimi `/api/health` 200 + `/sparring.html` 200, api.jjan·beside 도달,
+   전 도메인 000 해소.
+
+## 남은 리스크
+
+**재발 가능하다.** 정본화(6개 블록 전부 담은 단일 파일)는 했지만, 그 파일을 병렬
+세션이 또 부분 재작성하면 똑같이 죽는다. 진짜 방어는 **Caddyfile 편집 창구를 하나로**
+두거나, **모든 블록을 담은 정본을 베이스로만** 재생성하는 규칙이다.
+
+## 교훈
+
+- "백엔드 멀쩡 + 인증서 있음 + 그런데 TLS부터 실패" = **활성 라우팅 config에서 그 도메인
+  블록이 빠졌나**를 의심하라. 확인 순서: 컨테이너 → 인증서 → **active config의 도메인 블록**.
+- 공유 인프라(한 Caddy에 여러 프로젝트)는 편집 충돌이 곧 남의 서비스 장애다. 단일 정본 원칙.
+- 부하테스트(k6)가 먼저 냄새를 맡았다(`tls: internal error`) — 해피패스 curl 하나로는 놓쳤을 것.

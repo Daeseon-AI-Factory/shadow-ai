@@ -15,10 +15,12 @@ import { authApi, ApiError } from '@shadow-ai/core';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { pressableRipple, pressableStyle, useTheme } from '@/hooks/use-theme';
 import { useAuthStore } from '@/lib/auth-store';
 import { t } from '@/lib/i18n';
 
 export default function LoginScreen() {
+  const theme = useTheme();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const signIn = useAuthStore((s) => s.signIn);
@@ -46,9 +48,17 @@ export default function LoginScreen() {
             <ThemedText type="small">{t('login.subtitle')}</ThemedText>
 
             <TextInput
-              style={styles.input}
+              style={[
+                styles.input,
+                {
+                  color: theme.text,
+                  backgroundColor: theme.backgroundElement,
+                  borderColor: theme.border,
+                },
+              ]}
               placeholder={t('login.email')}
-              placeholderTextColor="#9ca3af"
+              placeholderTextColor={theme.textSecondary}
+              selectionColor={theme.primary}
               autoCapitalize="none"
               keyboardType="email-address"
               autoComplete="email"
@@ -56,9 +66,17 @@ export default function LoginScreen() {
               onChangeText={setEmail}
             />
             <TextInput
-              style={styles.input}
+              style={[
+                styles.input,
+                {
+                  color: theme.text,
+                  backgroundColor: theme.backgroundElement,
+                  borderColor: theme.border,
+                },
+              ]}
               placeholder={t('login.password')}
-              placeholderTextColor="#9ca3af"
+              placeholderTextColor={theme.textSecondary}
+              selectionColor={theme.primary}
               secureTextEntry
               autoComplete="password"
               value={password}
@@ -68,7 +86,11 @@ export default function LoginScreen() {
             {errorMessage && <ThemedText style={styles.error}>{errorMessage}</ThemedText>}
 
             <Pressable
-              style={[styles.button, (!email || !password) && styles.buttonDisabled]}
+              style={pressableStyle([
+                styles.button,
+                (!email || !password) && styles.buttonDisabled,
+              ])}
+              android_ripple={pressableRipple}
               disabled={!email || !password || login.isPending}
               onPress={() => login.mutate()}
             >
@@ -79,7 +101,11 @@ export default function LoginScreen() {
               )}
             </Pressable>
 
-            <Pressable style={styles.linkRow} onPress={() => router.replace('/signup')}>
+            <Pressable
+              style={pressableStyle(styles.linkRow)}
+              android_ripple={pressableRipple}
+              onPress={() => router.replace('/signup')}
+            >
               <ThemedText type="small">{t('login.newHere')} </ThemedText>
               <ThemedText style={styles.link}>{t('login.createAccount')}</ThemedText>
             </Pressable>
@@ -95,13 +121,10 @@ const styles = StyleSheet.create({
   container: { flex: 1, padding: 24, gap: 14, justifyContent: 'center' },
   input: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#9ca3af',
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 16,
-    color: '#111827',
-    backgroundColor: '#fff',
   },
   error: { color: '#dc2626' },
   button: {

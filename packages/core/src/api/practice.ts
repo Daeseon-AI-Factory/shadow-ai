@@ -79,6 +79,31 @@ export interface SparringTarget {
   ko?: string; // Korean gloss
 }
 
+export interface SparringReportTarget {
+  cardKey: string;
+  label: string;
+  ko?: string | null;
+}
+
+export interface SparringReportedTarget {
+  cardKey: string;
+  label: string;
+  ko: string | null;
+}
+
+export interface SparringCorrection {
+  original: string;
+  corrected: string;
+  explanation: string;
+}
+
+export interface SparringReport {
+  usedTargets: SparringReportedTarget[];
+  missedTargets: SparringReportedTarget[];
+  corrections: SparringCorrection[];
+  recurringMistakes: string[];
+}
+
 // One turn of the AI mock interview; empty history asks for the opening question.
 export interface MockTurn {
   role: "interviewer" | "candidate";
@@ -114,6 +139,9 @@ export const practiceApi = {
   // Mint a realtime voice sparring session — targets are the learner's due cards to elicit.
   sparringSession: (mode: 'chat' | 'interview', targets: SparringTarget[]) =>
     apiClient.post<SparringSession>("/api/practice/sparring/session", { mode, targets }),
+  // Analyze the learner's transcribed turns against the exact SRS targets used in the session.
+  sparringReport: (userTurns: string[], targets: SparringReportTarget[]) =>
+    apiClient.post<SparringReport>("/api/practice/sparring/report", { userTurns, targets }),
   // Upload an audio clip → Whisper transcript. `file` is a React Native file descriptor.
   transcribe: (file: { uri: string; name: string; type: string }) => {
     const form = new FormData();

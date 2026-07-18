@@ -3,6 +3,7 @@ import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 
 import { ThemedText } from './themed-text';
 import { useTheme } from '@/hooks/use-theme';
+import { semiBoldSymbolWeight } from '@/lib/symbol-weights';
 
 type Action = { label: string; onPress: () => void };
 
@@ -28,7 +29,12 @@ export function EmptyState({
   return (
     <View style={styles.wrap}>
       <View style={[styles.iconWrap, { backgroundColor: theme.primarySoft }]}>
-        <SymbolView name={icon} size={30} weight="semibold" tintColor={theme.primary} />
+        <SymbolView
+          name={icon}
+          size={30}
+          weight={{ ios: 'semibold', android: semiBoldSymbolWeight }}
+          tintColor={theme.primary}
+        />
       </View>
       <ThemedText type="subtitle" style={styles.title}>
         {title}

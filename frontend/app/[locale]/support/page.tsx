@@ -6,18 +6,6 @@ export async function generateMetadata() {
 
 const SUPPORT_EMAIL = "showep12@gmail.com";
 
-// Screens live in /public/screenshots (copied from the App Store submission build).
-const SCREENS: { src: string; caption: string }[] = [
-  { src: "/screenshots/shot-1.jpeg", caption: "Shadow any YouTube video, line by line." },
-  { src: "/screenshots/shot-8.jpeg", caption: "Adjust playback speed and loop a section to drill it." },
-  { src: "/screenshots/shot-3.jpeg", caption: "Speaking practice — respond to a situation in English." },
-  { src: "/screenshots/shot-4.jpeg", caption: "Word-by-word notes for every clip." },
-  { src: "/screenshots/shot-7.jpeg", caption: "Build-the-order drills reinforce sentence structure." },
-  { src: "/screenshots/shot-5.jpeg", caption: "Spaced-repetition review brings clips back at the right time." },
-  { src: "/screenshots/shot-2.jpeg", caption: "Your personal library of videos and clips." },
-  { src: "/screenshots/shot-6.jpeg", caption: "Track your streak, clips, and mastery." },
-];
-
 const FAQ: { q: string; a: React.ReactNode }[] = [
   {
     q: "What is Mimi?",
@@ -25,11 +13,11 @@ const FAQ: { q: string; a: React.ReactNode }[] = [
   },
   {
     q: "Does Mimi cost anything?",
-    a: "No. Every feature is free to use. There is no in-app purchase, no subscription, and no paid content. The “FREE” label in the app is simply an informational status badge for your account.",
+    a: "Mimi’s core shadowing, drill, and spaced-repetition features are free. AI conversation and AI answer grading are available only to invited accounts during the current controlled rollout. The iOS app has no in-app purchase, subscription, pricing screen, upgrade button, or external purchase link.",
   },
   {
     q: "How do I import a video?",
-    a: "Open the Library tab, tap “+ Import a video,” and paste a YouTube link. Mimi fetches the captions and prepares the clips for you.",
+    a: "Open the Shadowing tab, tap “+ Import a video,” and paste a YouTube link. Mimi fetches the captions and prepares the clips for you.",
   },
   {
     q: "How do I delete my account?",
@@ -80,25 +68,6 @@ export default function SupportPage() {
             </div>
           ))}
         </dl>
-      </section>
-
-      <section className="space-y-4">
-        <h2 className="text-base font-semibold">A quick tour</h2>
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-          {SCREENS.map(({ src, caption }) => (
-            <figure key={src} className="space-y-2">
-              {/* Static screenshots from the production build; plain img keeps it config-free. */}
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={src}
-                alt={caption}
-                className="w-full rounded-lg border bg-muted"
-                loading="lazy"
-              />
-              <figcaption className="text-xs text-muted-foreground">{caption}</figcaption>
-            </figure>
-          ))}
-        </div>
       </section>
 
       <footer className="mt-4 flex gap-4 border-t pt-4 text-sm text-muted-foreground">

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Dimensions,
   FlatList,
   Pressable,
@@ -12,19 +13,34 @@ import { Redirect, router, useLocalSearchParams } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import YoutubePlayer, { type YoutubeIframeRef } from 'react-native-youtube-iframe';
-import { clipsApi, videosApi, type TranscriptSegment } from '@shadow-ai/core';
+import { ApiError, clipsApi, videosApi, type TranscriptSegment } from '@shadow-ai/core';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { ErrorState } from '@/components/error-state';
 import { LineRecorder } from '@/components/line-recorder';
+import { pressableRipple, pressableStyle } from '@/hooks/use-theme';
 import { useAuthStore } from '@/lib/auth-store';
 import { t } from '@/lib/i18n';
+import { boldSymbolWeight } from '@/lib/symbol-weights';
+
+const ALERT_REOPEN_DELAY_MS = 350;
+type ClipAttempt = {
+  videoId: string;
+  segment: TranscriptSegment;
+  routeGeneration: number;
+};
 
 export default function VideoDetailScreen() {
   const token = useAuthStore((s) => s.token);
   const { id } = useLocalSearchParams<{ id: string }>();
   const playerRef = useRef<YoutubeIframeRef>(null);
+  const makingClipRef = useRef(false);
+  const feedbackActiveRef = useRef(true);
+  const routeGenerationRef = useRef(0);
+  const feedbackPendingRef = useRef(false);
+  const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [feedbackPending, setFeedbackPending] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [currentMs, setCurrentMs] = useState(0);
   const [mode, setMode] = useState<'sentences' | 'full'>('sentences');
@@ -59,18 +75,97 @@ export default function VideoDetailScreen() {
     enabled: !!token && !!id,
   });
 
+  useEffect(() => {
+    routeGenerationRef.current += 1;
+    feedbackActiveRef.current = true;
+    feedbackPendingRef.current = false;
+    setFeedbackPending(false);
+    return () => {
+      feedbackActiveRef.current = false;
+      routeGenerationRef.current += 1;
+      if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+      feedbackTimerRef.current = null;
+      feedbackPendingRef.current = false;
+    };
+  }, [id]);
+
+  const releaseClipFeedback = () => {
+    if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+    feedbackTimerRef.current = null;
+    feedbackPendingRef.current = false;
+    if (feedbackActiveRef.current) setFeedbackPending(false);
+  };
+
+  const queueClipFeedback = (variables: ClipAttempt) => {
+    if (
+      !feedbackActiveRef.current ||
+      variables.routeGeneration !== routeGenerationRef.current
+    ) return;
+    feedbackPendingRef.current = true;
+    setFeedbackPending(true);
+    if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+    const feedbackTimer = setTimeout(() => {
+      if (feedbackTimerRef.current !== feedbackTimer) return;
+      feedbackTimerRef.current = null;
+      if (
+        !feedbackActiveRef.current ||
+        variables.routeGeneration !== routeGenerationRef.current
+      ) return;
+      Alert.alert(
+        t('feedback.clipCreateFailedTitle'),
+        t('feedback.clipCreateFailedMessage'),
+        [
+          { text: t('common.cancel'), style: 'cancel', onPress: releaseClipFeedback },
+          {
+            text: t('common.retry'),
+            onPress: () => {
+              releaseClipFeedback();
+              if (!feedbackActiveRef.current) return;
+              submitClip(variables);
+            },
+          },
+        ],
+        { cancelable: true, onDismiss: releaseClipFeedback },
+      );
+    }, ALERT_REOPEN_DELAY_MS);
+    feedbackTimerRef.current = feedbackTimer;
+  };
+
   // Make a one-line clip from a transcript line, then open the clip player (loop + record + AI).
   const makeClip = useMutation({
-    mutationFn: (seg: TranscriptSegment) =>
+    mutationFn: ({ videoId, segment }: ClipAttempt) =>
       clipsApi.create({
-        videoId: id,
-        startMs: seg.startMs,
-        endMs: seg.endMs,
-        name: seg.text.slice(0, 40),
+        videoId,
+        startMs: segment.startMs,
+        endMs: segment.endMs,
+        name: segment.text.slice(0, 40),
         tags: [],
       }),
-    onSuccess: (clip) => router.push(`/player/${clip.id}`),
+    onSuccess: (clip, variables) => {
+      if (
+        feedbackActiveRef.current &&
+        variables.routeGeneration === routeGenerationRef.current
+      ) router.push(`/player/${clip.id}`);
+    },
+    onError: (error, variables) => {
+      if (error instanceof ApiError && error.status === 401) return;
+      queueClipFeedback(variables);
+    },
+    onSettled: () => {
+      makingClipRef.current = false;
+    },
   });
+
+  const submitClip = (variables: ClipAttempt) => {
+    if (
+      !feedbackActiveRef.current ||
+      variables.routeGeneration !== routeGenerationRef.current ||
+      makingClipRef.current ||
+      feedbackPendingRef.current
+    ) return;
+    makingClipRef.current = true;
+    makeClip.mutate(variables);
+  };
 
   const lines: TranscriptSegment[] = useMemo(() => {
     const v = video.data;
@@ -235,7 +330,8 @@ export default function VideoDetailScreen() {
         {/* Controls + script-mode toggle */}
         <View style={styles.bar}>
           <Pressable
-            style={styles.playBtn}
+            style={pressableStyle(styles.playBtn)}
+            android_ripple={pressableRipple}
             onPress={() => setPlaying((p) => !p)}
             accessibilityRole="button"
             accessibilityLabel={playing ? t('video.pause') : t('video.play')}
@@ -246,7 +342,8 @@ export default function VideoDetailScreen() {
           </Pressable>
           <View style={styles.toggle}>
             <Pressable
-              style={[styles.toggleItem, mode === 'sentences' && styles.toggleOn]}
+              style={pressableStyle([styles.toggleItem, mode === 'sentences' && styles.toggleOn])}
+              android_ripple={pressableRipple}
               onPress={() => setMode('sentences')}
               accessibilityRole="button"
               accessibilityState={{ selected: mode === 'sentences' }}
@@ -256,7 +353,8 @@ export default function VideoDetailScreen() {
               </ThemedText>
             </Pressable>
             <Pressable
-              style={[styles.toggleItem, mode === 'full' && styles.toggleOn]}
+              style={pressableStyle([styles.toggleItem, mode === 'full' && styles.toggleOn])}
+              android_ripple={pressableRipple}
               onPress={() => setMode('full')}
               accessibilityRole="button"
               accessibilityState={{ selected: mode === 'full' }}
@@ -270,7 +368,8 @@ export default function VideoDetailScreen() {
 
         {/* Advanced controls (speed, A-B range, auto-advance) are tucked behind a toggle. */}
         <Pressable
-          style={styles.advToggle}
+          style={pressableStyle(styles.advToggle)}
+          android_ripple={pressableRipple}
           onPress={() => setShowAdvanced((v) => !v)}
           accessibilityRole="button"
           accessibilityLabel={t('video.advanced')}
@@ -281,7 +380,7 @@ export default function VideoDetailScreen() {
               ? { ios: 'chevron.up', android: 'keyboard_arrow_up', web: 'keyboard_arrow_up' }
               : { ios: 'chevron.down', android: 'keyboard_arrow_down', web: 'keyboard_arrow_down' }}
             size={16}
-            weight="bold"
+            weight={{ ios: 'bold', android: boldSymbolWeight }}
             tintColor="#6b7280"
           />
         </Pressable>
@@ -293,7 +392,8 @@ export default function VideoDetailScreen() {
           {[0.5, 0.75, 1, 1.25, 1.5].map((r) => (
             <Pressable
               key={r}
-              style={[styles.speedBtn, rate === r && styles.speedOn]}
+              style={pressableStyle([styles.speedBtn, rate === r && styles.speedOn])}
+              android_ripple={pressableRipple}
               onPress={() => setRate(r)}
               accessibilityRole="button"
               accessibilityState={{ selected: rate === r }}
@@ -308,7 +408,8 @@ export default function VideoDetailScreen() {
         {/* Shadow loop controls: A-B range, auto-advance, reps-per-line */}
         <View style={styles.loopBar}>
           <Pressable
-            style={[styles.loopCtl, arming !== 'none' && styles.loopCtlOn]}
+            style={pressableStyle([styles.loopCtl, arming !== 'none' && styles.loopCtlOn])}
+            android_ripple={pressableRipple}
             onPress={toggleAB}
             accessibilityRole="button"
             accessibilityState={{ selected: arming !== 'none' }}
@@ -318,7 +419,8 @@ export default function VideoDetailScreen() {
             </ThemedText>
           </Pressable>
           <Pressable
-            style={[styles.loopCtl, autoAdvance && styles.loopCtlOn]}
+            style={pressableStyle([styles.loopCtl, autoAdvance && styles.loopCtlOn])}
+            android_ripple={pressableRipple}
             onPress={() => setAutoAdvance((a) => !a)}
             accessibilityRole="button"
             accessibilityState={{ selected: autoAdvance }}
@@ -329,7 +431,8 @@ export default function VideoDetailScreen() {
           </Pressable>
           <View style={styles.repsBox}>
             <Pressable
-              style={styles.repsBtn}
+              style={pressableStyle(styles.repsBtn)}
+              android_ripple={pressableRipple}
               onPress={() => setReps((r) => Math.max(1, r - 1))}
               accessibilityRole="button"
               accessibilityLabel={t('common.decrease')}
@@ -340,7 +443,8 @@ export default function VideoDetailScreen() {
               {t('video.reps', { n: reps })}
             </ThemedText>
             <Pressable
-              style={styles.repsBtn}
+              style={pressableStyle(styles.repsBtn)}
+              android_ripple={pressableRipple}
               onPress={() => setReps((r) => Math.min(9, r + 1))}
               accessibilityRole="button"
               accessibilityLabel={t('common.increase')}
@@ -350,7 +454,8 @@ export default function VideoDetailScreen() {
           </View>
           {loop && (
             <Pressable
-              style={styles.loopCtl}
+              style={pressableStyle(styles.loopCtl)}
+              android_ripple={pressableRipple}
               onPress={() => setLoop(null)}
               accessibilityRole="button"
               accessibilityLabel={t('common.clear')}
@@ -400,7 +505,8 @@ export default function VideoDetailScreen() {
                 ]}
               >
                 <Pressable
-                  style={styles.lineText}
+                  style={pressableStyle(styles.lineText)}
+                  android_ripple={pressableRipple}
                   onPress={() => onLinePress(index)}
                   accessibilityRole="button"
                   accessibilityLabel={item.text}
@@ -411,9 +517,14 @@ export default function VideoDetailScreen() {
                 </Pressable>
                 {focused && (
                   <Pressable
-                    style={styles.clipBtn}
-                    disabled={makeClip.isPending}
-                    onPress={() => makeClip.mutate(item)}
+                    style={pressableStyle(styles.clipBtn)}
+                    android_ripple={pressableRipple}
+                    disabled={makeClip.isPending || feedbackPending}
+                    onPress={() => submitClip({
+                      videoId: id,
+                      segment: item,
+                      routeGeneration: routeGenerationRef.current,
+                    })}
                     accessibilityRole="button"
                     accessibilityLabel={t('video.clipLine')}
                   >

@@ -1,0 +1,60 @@
+---
+title: "iOS and Android store preparation now share one integrated candidate"
+date: "2026-07-16"
+project: "shadow-ai"
+kind: "tech-retro"
+visibility: "public"
+language: "en"
+summary: "Merged both store-readiness tracks, rebuilt the integrated mobile candidate, and kept production signing and policy gates explicitly open."
+tags: ["mobile", "ios", "android", "app-store", "google-play", "integration"]
+---
+
+## Integrated scope
+
+The combined branch now contains the App Store review packet, privacy/support corrections, iPhone source
+captures, Google Play registration packet, AAB/internal/draft profile defaults, credential-file ignores,
+and explicit Android permission removals. The only cherry-pick conflict was the troubleshooting append;
+both platform records were preserved.
+
+Visual review narrowed the iPhone source set to Home and Write. Practice and Import remain diagnostic
+captures but are not submission candidates. No screen or route was removed.
+
+## Verification from the combined HEAD
+
+The route audit reported Home, Shadow, Speaking, Write, and Me in order; Practice and Review remained
+hidden routes; all fifteen Practice destinations existed; and Home still exposed the two hidden flows.
+Mobile TypeScript exited zero. Frontend lint exited zero with thirteen existing warnings and no errors,
+and the production build generated 148 of 148 static pages.
+
+Production Expo exports completed for both platforms:
+
+```text
+iOS Bundled 10676ms node_modules/expo-router/entry.js (1654 modules)
+Android Bundled 10591ms node_modules/expo-router/entry.js (1746 modules)
+```
+
+Each export contains the production API URL once and the missing-environment error string zero times.
+
+JDK 17 and Android SDK 36 produced the native packages:
+
+```text
+BUILD SUCCESSFUL in 3m 24s
+662 actionable tasks: 634 executed, 28 up-to-date
+```
+
+The APK reports package `ai.daeseon.mimi`, version `1.1.0`, and target SDK 36. It includes the recording
+and audio-mode permissions while excluding the two storage permissions and `SYSTEM_ALERT_WINDOW`. APK v2
+signature verification passed. The AAB passed ZIP integrity and printed `jar verified`.
+
+These native artifacts use the generated debug keystore. They prove local package generation, not Play
+upload signing. The production-only npm audit also remains open at two moderate and one high advisory;
+no automatic dependency rewrite was applied.
+
+## Remaining external gates
+
+No emulator or physical Android device was attached for a final install. Production-signed AAB creation,
+Play App Signing and Console forms, Android graphics, the external account-deletion request flow, iOS
+native archive/device behavior, final reviewer credentials, and both store submissions remain
+[unverified]. No build, metadata, screenshot, or release was uploaded.
+
+Evidence update commit: `574e9691daaa8e29e1a8e523fd3504811a3f5094`.

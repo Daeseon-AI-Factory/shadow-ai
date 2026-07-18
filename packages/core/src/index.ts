@@ -15,6 +15,7 @@ export * from "./prepositions-primer";
 export * from "./practice-srs";
 export * from "./sparring-detect";
 export * from "./practice-cards";
+export * from "./practice-mastery";
 export * from "./interview-drill";
 export * from "./interview-terms";
 export * from "./interview-phrases";
