@@ -2982,3 +2982,63 @@ XML 집계: tests=193 failures=0 errors=0 skipped=0
 — 이번에 regenerate는 삭제 전, 자동분석은 행 생성 전에 게이트를 놓아야 스피너·삭제 부작용이
 안 남는다. 그리고 @Transactional 테스트에서 JPA와 raw JDBC를 섞으면 flush/1차 캐시 양방향으로
 속는다.
+
+---
+
+## 2026-07-20 — PAY-2: RevenueCat provider adapter + webhook + sync, 리뷰가 경쟁조건·환경오탐 2건 적발
+
+**Symptom.** PAY-1이 만든 capability 중앙 판정에 실제 RevenueCat 연동이 없었다. `/api/billing/webhook`은
+payment-agnostic 스켈레톤(§6.3에서 PAY-2 시점 은퇴 예정)뿐이었다.
+
+**Fix.** `BillingEntitlementProvider` 인터페이스(§5.3) + `RevenueCatClient` 첫 어댑터 — 필드명
+(`entitlements.expires_date`, `subscriptions.is_sandbox`, webhook `event`/`api_version` 래핑,
+HMAC `X-RevenueCat-Webhook-Signature: t=..,v1=..`)은 이번 세션에 RevenueCat 공식 문서를 실제
+fetch해서 확인한 값. `billing_events`(V22, JDBC 멱등 원장) + `EntitlementSyncService`(스냅샷 적용)
++ `RevenueCatWebhookController`(auth header+선택적 HMAC, 재전달 시 FAILED/RECEIVED는 재처리)
++ `BillingSyncController`(JWT 기반 userId, 2단 rate limit) + 구 webhook 완전 은퇴(라우트·permitAll·
+설정·terraform 시크리트 프로비저닝까지).
+
+**과정의 함정 3개.**
+1. `RevenueCatClient`/`EntitlementSyncService`에 생성자 2개를 두고 `@Autowired`를 빠뜨려 Spring이
+   빈을 못 만듦 → 컨텍스트 로딩이 필요한 테스트 56개 연쇄 실패. PAY-1에서 `EntitlementService`엔
+   제대로 붙였던 패턴을 반복 못 함.
+2. `application-integ.yml`이 `tubeshadow.rate-limit.enabled: false`로 통합 테스트 전체에서
+   rate limit을 끔 — MockMvc로 429를 기대한 테스트가 항상 200. 기존 `ComposeRateLimitInterceptorTest`
+   패턴(유닛 테스트, 직접 인스턴스화)으로 전환.
+3. `EntitlementSyncServiceTest.createUser()`가 MockMvc(JPA 쓰기) 직후 raw JDBC로 조회 —
+   PAY-1과 동일한 flush 타이밍 버그 재발. `UserRepository.findByEmail()`(JPA, auto-flush 유도)로 수정.
+
+**Review.** 3-렌즈 적대 리뷰(보안/동기화 정확성/PAY-2 수용기준, 에이전트 3)가 10건 반환 →
+실제 결함 6건 수정:
+- **[HIGH] 신규 행 경쟁 조건** — find-then-save 방식이라 동시 두 요청이 모두 "행 없음"을 보고
+  동시 INSERT, 더 새 데이터가 이긴다는 보장 없음. `INSERT ... ON CONFLICT ... DO UPDATE ... WHERE`
+  단일 원자 문장으로 재작성해 근본 해결.
+- **[HIGH] sandbox 오탐지** — `detectEnvironment`가 구독자의 모든 subscription을 스캔해 하나라도
+  sandbox면 전체 스냅샷을 SANDBOX로 태그 → 과거 테스트 구매 이력이 있는 진짜 유료 고객이
+  프로덕션 접근 판정에서 안 보이게 됨. entitlement별 `product_identifier`로 해당 구독만 조회하도록
+  수정 + mixed sandbox+production 회귀 테스트 추가.
+- **[HIGH] 공유 provider-call budget 부재** — §8.2/§8.3이 요구하는 webhook↔sync 공유 예산이 없었음.
+  `RevenueCatCallBudget`을 클라이언트 레벨에 신설해 양쪽 호출을 자동으로 공유.
+- **[HIGH] 재시도 테스트 과장 주장** — 클래스 Javadoc이 "retry-on-failure" 커버리지를 주장했지만
+  실제로 FAILED 경로를 트리거하는 테스트가 없었음. `FakeBillingEntitlementProvider`에 실패 주입
+  추가 + 실제 재시도 테스트 작성.
+- **[MEDIUM] malformed webhook 미로깅** — 로그 추가.
+- **[MEDIUM] terraform 죽은 시크릿** — `BILLING_WEBHOOK_SECRET` 프로비저닝이 4개 .tf 파일에 남아있어
+  제거(variables/secrets/iam/ecs.tf), `terraform validate` 통과 확인.
+- 스킵 2건: rate-limit bucket 맵 미방출(기존 `ComposeRateLimitInterceptor`/`AuthRateLimitFilter`와
+  동일 패턴 반복, PAY-2 고유 회귀 아님) / `Exception`만 catch(`Throwable`까지 잡는 건 일반적으로
+  권장되지 않는 설계 — 의도적 절제).
+
+**Verification.**
+```
+./gradlew test → BUILD SUCCESSFUL in 1m 13s
+XML 집계: tests=216 failures=0 errors=0 skipped=0
+terraform validate → Success
+```
+
+**Commit.** `69efd8f`.
+
+**Pattern.** find-then-save는 동시 쓰기 경계에서 항상 경쟁 조건 후보다 — 멱등성/단조성이 진짜
+요구사항이면 처음부터 DB 원자 연산(`ON CONFLICT ... WHERE`)으로 설계한다. 그리고 외부 API 필드
+가정은 코드 작성 전에 반드시 공식 문서로 확인 — "그럴듯한 스키마"는 이번처럼 실제 데이터 모델과
+어긋나 보안·접근권한 버그가 된다.
