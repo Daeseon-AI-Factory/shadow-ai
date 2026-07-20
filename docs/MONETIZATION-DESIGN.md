@@ -1,6 +1,11 @@
 # Mimi monetization and entitlement design
 
-> Status: implementation specification, 2026-07-18 (America/Toronto)
+> Status: implementation specification, 2026-07-18 (America/Toronto).
+> Revised **PAY-0.1**, 2026-07-20: an adversarial review verified 25 repository/policy claims
+> against `main` and surfaced 13 design findings; all 13 are incorporated in this revision
+> (vendor-cost path, entitlement environment/source rules, legacy plan mapping, restore/transfer
+> default, deck/library gating, admin-grant lifecycle, aggregate rate limits, guided sample
+> ownership).
 >
 > Repository snapshot inspected: `main` at `d33ec70c2a19adfede957c96cabb9724f37894d5`
 >
@@ -45,6 +50,8 @@ tools. This is the non-negotiable product boundary for every implementation trac
 | Shadow monthly price | **EXAMPLE, NOT APPROVED SKU PRICE** | `KRW 8,800` is a pricing hypothesis only. Never hardcode it in the app. |
 | Shadow annual price | **EXAMPLE, NOT APPROVED SKU PRICE** | Targeting a 5,000-won-range monthly equivalent is a hypothesis only. |
 | AI price and fair-use limit | **OPEN** | Do not activate a public AI product until model cost and a configurable safety limit are set. |
+| New-video import is a Shadow capability | **IMPLEMENTATION DEFAULT, OWNER MAY OVERRIDE BEFORE PAY-3** | Free Preview browses the fixed sample and already-available curated/imported videos only; `POST /api/videos/import` requires `SHADOW_ACCESS` because its transcript path can call the metered Supadata vendor fallback. |
+| Restore keeps entitlements with the original App User ID | **IMPLEMENTATION DEFAULT, OWNER MAY OVERRIDE BEFORE PAY-4** | Configure RevenueCat restore/transfer behavior so one store account cannot silently unlock additional Mimi accounts (section 11.2). |
 | YouTube caption acquisition for paid public use | **OPEN LAUNCH GATE** | Current scraping-based path must not be silently treated as commercially cleared. |
 
 If the owner tells a development agent only `진행`, the implementation defaults above apply. Exact
@@ -91,11 +98,19 @@ The following statements were read directly from the repository snapshot named a
    after a shared-secret check. It is a skeleton, not a RevenueCat event adapter.
 7. `mobile/package.json` does not contain `react-native-purchases` or another IAP SDK.
 8. Mobile Settings renders only `FREE` or `PRO`; Speaking and Write translate `AI_NOT_ALLOWED` into
-   invite-only screens.
+   invite-only screens. The Speaking screen also recognizes a second code, `SPARRING_NOT_ALLOWED`
+   (`mobile/src/app/(tabs)/sparring.tsx`), emitted by `SparringClient.assertAllowed` — a dormant
+   deny-by-default email allowlist that production code does not currently call.
 9. Mimi authentication is the repository's Spring Security JWT flow, and `/api/auth/me` already
    returns the user's UUID.
 10. `BLOCKERS.md` records the arbitrary-public-video caption path as watch-HTML / timedtext
     extraction with commercial Terms-of-Service risk.
+11. `POST /api/videos/import` (`VideoController`) is reachable by any authenticated user with no
+    plan gate, auto-saves into the personal My Videos library (`LibraryVideoController`), and its
+    transcript fetch can fall back to the metered Supadata vendor (`SupadataTranscriptClient`,
+    "paid/vendor fallback" per its own Javadoc).
+12. `DeckController` exposes personal organization writes (deck create, rename, move-clip) with no
+    plan gate.
 
 Consequences:
 
@@ -106,6 +121,8 @@ Consequences:
   spend model capacity.
 - A retried identical generic webhook is harmless, but a simple overwrite does not by itself prove
   safe handling of old events arriving after new ones.
+- New-video import can spend metered vendor credits (Supadata) for any authenticated user, so the
+  paid-cost boundary is not limited to model calls.
 
 Historical memory references:
 
@@ -141,6 +158,8 @@ The AI products should grant both capabilities so dashboards and backend snapsho
 | --- | :---: | :---: | :---: |
 | Sign up, sign in, account deletion, privacy/terms | Yes | Yes | Yes |
 | Normal embedded video playback | Yes | Yes | Yes |
+| Import new videos and save to My Videos library | Browse curated/sample only, no saves | Yes | Yes |
+| Personal deck organization (create, rename, move clips) | No | Yes | Yes |
 | Fixed guided Mimi sample | Limited | Yes | Yes |
 | Precise range selection and repeat controls | Sample only | Yes | Yes |
 | Playback speed as a Mimi training control | Sample only | Yes | Yes |
@@ -300,19 +319,31 @@ status                  VARCHAR  // ACTIVE | INACTIVE
 expires_at              TIMESTAMP NULL
 source                  VARCHAR  // REVENUECAT | ADMIN_GRANT | MIGRATION
 provider_customer_id    VARCHAR NULL
-environment             VARCHAR NULL  // SANDBOX | PRODUCTION for provider rows
+environment             VARCHAR NOT NULL DEFAULT 'PRODUCTION'  // SANDBOX | PRODUCTION
 last_provider_event_at  TIMESTAMP NULL
 last_verified_at        TIMESTAMP NOT NULL
 created_at              TIMESTAMP NOT NULL
 updated_at              TIMESTAMP NOT NULL
-PRIMARY KEY (user_id, capability)
+PRIMARY KEY (user_id, capability, source, environment)
 ```
 
 Rules:
 
 - `expires_at = null` is allowed only for a deliberately non-expiring admin/migration grant. A
   missing subscription expiry must not accidentally create lifetime access.
-- Production and sandbox state must never be merged blindly.
+- Production and sandbox state must never be merged blindly. Concretely: access checks read only
+  rows whose `environment` matches the server's configured billing environment (production
+  servers: `PRODUCTION`). Sandbox rows are stored for PAY-4 testing and audit but never grant
+  access on a production server — the composite primary key exists so both can coexist for the
+  same user without overwriting each other.
+- A capability is active when ANY matching row (across sources) is active and unexpired. Provider
+  snapshot application upserts only rows with `source = REVENUECAT` and must never modify
+  `ADMIN_GRANT` or `MIGRATION` rows — a store test purchase by the owner must not clobber the
+  owner's non-expiring admin grant, and a stale provider snapshot must not resurrect a revoked
+  one.
+- Snapshot writes are monotonic: record the snapshot's request/event time and refuse to overwrite
+  entitlement state with data older than the stored `last_provider_event_at` (webhook-triggered
+  and `/sync`-triggered fetches can race).
 - Account deletion must cascade through this table and its regression test.
 - Access checks use a caller-provided/testable `Clock`, not scattered `Instant.now()` calls.
 
@@ -348,8 +379,18 @@ Use a compatibility phase:
 2. Backfill currently effective `pro` users as both `SHADOW_ACCESS` and `AI_ACCESS` with the existing
    expiry and `MIGRATION` source.
 3. Make `/api/auth/me` return new entitlement data while retaining old `plan` fields temporarily.
+   The compatibility mapping is fixed: the legacy `plan` field reports `pro` only while
+   `AI_ACCESS` is active; a Shadow-only subscriber reports legacy `free`. Rationale: shipped
+   clients use the field only for the PRO badge, while reporting `pro` before step 4 completes
+   would make the current `AiGate` (any non-`free` effective plan passes) grant AI to Shadow.
+   `users.plan` keeps its `free|pro` value space — `shadow` is never written to it, so the V18
+   CHECK constraint and the webhook DTO regex stay untouched.
 4. Change every access decision to the new `AccessPolicy`.
-5. Remove production writes through the generic set-plan endpoint.
+5. Remove production writes through the generic set-plan endpoint (owned by **PAY-2**). All three
+   enabling artifacts go together: the `/api/billing/webhook` route (delete or permanently fail
+   closed), its `permitAll` entry in `SecurityConfig`, and the
+   `tubeshadow.billing.webhook-secret` config. Leaving any of them keeps a live secret-gated
+   write path to `users.plan` that bypasses `billing_events` and `user_entitlements`.
 6. Remove or deprecate `users.plan`, `plan_valid_until`, and `billing_customer_id` only in a later,
    separately verified migration after every client has moved.
 
@@ -378,7 +419,11 @@ Recommended error contract:
 ```
 
 Keep `AI_NOT_ALLOWED` as a temporary client compatibility alias if needed, but new UI should map a
-typed access reason to the correct paywall rather than an invite-only screen.
+typed access reason to the correct paywall rather than an invite-only screen. The same applies to
+`SPARRING_NOT_ALLOWED`: the shipped Speaking screen treats it as invite-only, so during the
+compatibility window the client routes both codes to the AI paywall, and PAY-1 decides the fate of
+the dormant `SparringClient.assertAllowed` allowlist (fold it into `AccessPolicy`/admin grants or
+delete it) so realtime minting has exactly one entitlement gate.
 
 ### 7.2 Shadow enforcement points
 
@@ -388,6 +433,10 @@ Enforce on backend operations that create or advance the paid personal workflow,
 - recording upload/create;
 - creation or grading of paid review/SRS progress;
 - server-backed paid practice progression;
+- personal organization writes: deck create/rename and moving clips between decks
+  (`DeckController`), and My Videos library saves (`LibraryVideoController`);
+- new-video import (`POST /api/videos/import`) — Shadow by default because its transcript path
+  can spend metered Supadata vendor credits (section 0.1);
 - any new server endpoint introduced for paid Shadow tools.
 
 Do not block account deletion, export, subscription management, or deletion of user-owned data.
@@ -408,6 +457,11 @@ Every path that can call a configured model or allocate paid realtime capacity m
 - STT upload/transcription;
 - realtime session minting and reports.
 
+AI is not the only metered spend: the Supadata transcript vendor fallback
+(`SupadataTranscriptClient`, reached from video import and its re-import self-heal path) is a paid
+per-call cost. It follows the Shadow gate on import (section 7.2), and the boot-time
+`CuratedCollectionSeeder` path remains owner-controlled configuration, not user-triggerable spend.
+
 For Shadow users creating a clip, do not leave an eternal `PENDING` analysis row. Either create no
 analysis row or store an explicit non-pending locked state. The mobile analysis tab should show an
 AI upgrade explanation, not a spinner.
@@ -417,6 +471,13 @@ AI upgrade explanation, not a spinner.
 Replace the email allowlist's role as a hidden pseudo-plan with an explicit admin-grant source or a
 well-isolated compatibility adapter. Production access behavior must be inspectable in the same
 entitlement snapshot the user sees. Never expose a client control that can create an admin grant.
+
+Admin grants need a real lifecycle: created/revoked only through a server-side operator procedure;
+every change recorded in `billing_events` with `provider = ADMIN` and a synthetic unique event ID
+(so grants are audited even though they have no store event); and the internal entitlement
+snapshot exposes `source` and `environment`, so an `ADMIN_GRANT` or leaked sandbox row is
+distinguishable from a paid entitlement. The public `/me` block stays minimal — inspection happens
+through an internal/admin surface, not the client API.
 
 ## 8. Billing API contract
 
@@ -455,6 +516,10 @@ Requirements:
 - fetch the current subscriber snapshot from RevenueCat;
 - map provider entitlements to `SHADOW_ACCESS` and `AI_ACCESS` transactionally;
 - record a retryable failure without granting access on malformed/unverified input;
+- apply snapshots monotonically — never overwrite newer entitlement state with an older fetch
+  (section 6.1);
+- share a global provider-call budget/circuit breaker with `/api/billing/sync` so a webhook flood
+  cannot exhaust RevenueCat REST limits and starve legitimate entitlement updates;
 - never accept a caller-supplied Mimi `userId + capability` decision from the mobile client.
 
 RevenueCat recommends fetching the subscriber snapshot after webhook events rather than writing
@@ -472,6 +537,11 @@ Authorization: Bearer <Mimi JWT>
 The server derives the user ID from the JWT, fetches that user's provider snapshot, updates local
 entitlements, and returns the same entitlement shape as `/me`. It never accepts an arbitrary target
 user ID. Use it after a client purchase or restore so UI does not wait only for webhook delivery.
+
+Rate limiting must bound the aggregate, not only the per-user rate: signup is free, so K
+throwaway accounts times a per-user limit is still unbounded provider spend. Combine a per-user
+limit and minimum re-fetch interval (single-flight per user, short snapshot cache) with the
+global provider-call budget/circuit breaker shared with webhook processing (section 8.2).
 
 ## 9. RevenueCat and store catalog
 
@@ -600,8 +670,13 @@ Replace the binary `FREE/PRO` badge with:
 - Restore is visible from the paywall and Settings.
 - Successful restore triggers authenticated backend sync before protected APIs are considered
   current.
-- A restore on one Mimi account must not silently grant a second Mimi account access. Account
-  transfer policy must be chosen and tested in RevenueCat before release.
+- A restore on one Mimi account must not silently grant a second Mimi account access.
+  Implementation default: configure RevenueCat restore/transfer behavior so entitlements stay
+  with the original App User ID — no silent transfer between Mimi accounts. The owner may
+  override before PAY-4; the chosen behavior is exercised in PAY-4's account-switch scenarios,
+  listed as an owner input (section 16), and gated at release (section 15). Without this, one
+  paid store account can serially unlock unlimited Mimi accounts via log-out → sign-up →
+  restore.
 
 ### 11.3 Account deletion
 
@@ -668,8 +743,12 @@ Targets:
 
 - next Flyway migration (re-check that `V21` is still free);
 - entitlement domain/repository/service/access policy;
-- `User`/`MeResponse` compatibility;
-- replacement of `AiGate` decisions;
+- `User`/`MeResponse` compatibility, including the legacy `plan` mapping rule (section 6.3
+  step 3: legacy `pro` only while `AI_ACCESS` is active);
+- replacement of `AiGate` decisions, including a decision on the dormant
+  `SparringClient.assertAllowed` allowlist (section 7.1);
+- Shadow gating of the section 7.2 write surfaces, including deck/library organization writes
+  and new-video import (metered Supadata path);
 - `ClipAnalysisService` automatic analysis gate;
 - analysis regenerate gate;
 - backend tests and account-deletion cascade test.
@@ -694,7 +773,9 @@ Targets:
 - RevenueCat snapshot client;
 - authenticated/HMAC webhook adapter;
 - idempotent event persistence and retry behavior;
-- authenticated `/api/billing/sync` with rate limiting;
+- authenticated `/api/billing/sync` with rate limiting (per-user and aggregate, section 8.3);
+- retirement of the generic `/api/billing/webhook` set-plan path (section 6.3 step 5: route,
+  `permitAll` entry, and secret all removed);
 - contract/integration tests with mocked provider HTTP.
 
 No live purchase or production webhook is required for unit/integration completion.
@@ -708,8 +789,11 @@ Targets:
 - approved RevenueCat React Native dependency and native config;
 - authenticated billing client layer;
 - entitlement query/cache;
+- the guided sample flow (fixed, rights-reviewed sample per section 3.3) that fronts the primary
+  paywall entry point — no track builds this otherwise;
 - Shadow and AI paywall states;
-- invite-only replacement;
+- invite-only replacement (both `AI_NOT_ALLOWED` and `SPARRING_NOT_ALLOWED` route to the
+  paywall, section 7.1);
 - restore/manage subscription/Settings;
 - i18n and theme-token compliance.
 
@@ -788,6 +872,8 @@ Public paid release is not a single build result. All applicable gates must pass
 
 - [ ] Owner approves exact Shadow and AI prices and introductory offer.
 - [ ] Owner approves the AI fair-use rule.
+- [ ] Restore/transfer behavior is configured and verified so one store account cannot serially
+      unlock multiple Mimi accounts (section 11.2 default or owner override).
 - [ ] YouTube caption/content route is reviewed against the implementation and current terms.
 - [ ] Store agreements, tax/banking, product records, and review contact data are complete.
 - [ ] No web checkout link or unapproved alternative billing path is present in mobile.
@@ -804,6 +890,9 @@ These do not block PAY-1. They block the named later steps.
 | Exact monthly/annual prices and any introductory offer | PAY-4 |
 | AI price and fair-use/budget limit | PAY-5 and public AI sale |
 | Free Preview override, if different from the fixed-sample default | PAY-3 |
+| Guided sample content selection and rights review | PAY-3 completion and PAY-6 |
+| Restore/transfer behavior decision (default: keep with original App User ID, section 11.2) | PAY-4 |
+| New-video import gate override, if different from the Shadow default (section 0.1) | PAY-3 |
 | Caption/content policy route | PAY-6 public paid release |
 | Store review demo credentials entered privately, never committed | PAY-6 |
 
