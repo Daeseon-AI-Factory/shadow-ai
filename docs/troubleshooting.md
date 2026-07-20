@@ -2902,3 +2902,41 @@ PAY-1~PAY-6 순서와 3단계 검증표를 구현 명세로 기록했다. 제품
 
 **Pattern.** 가격제 하나를 문자열 한 칸으로 표현하면 상품 이름과 실제 권한이 결합된다.
 서버는 `free/pro` 라벨이 아니라 비용을 발생시키는 capability를 중앙에서 판정해야 한다.
+
+---
+
+## 2026-07-20 — PAY-0.1: 적대 검증 13건을 설계에 반영 + 세션 필독 문서 부패 수리
+
+**Symptom.** PAY-0 문서(`17702af`)의 적대 검증(리뷰어 8 + 발견별 3-렌즈 refuter, 에이전트 69)이
+저장소·외부정책 주장 25건을 전부 사실로 확인하면서도 설계 공백 13건(High 3)을 반환했다.
+동시에 세션 필독 체인이 부패 상태였다:
+
+```
+$ grep -c "TubeShadow" CLAUDE.md ROADMAP.md   → 1 / 1
+$ grep -ci "mimi" CLAUDE.md ROADMAP.md        → 0 / 0
+ROADMAP.md 최종 수정 2026-05-30 (866줄, "TubeShadow MVP — 24시간 실행 로드맵")
+```
+
+**Cause (verified).** 대표 발견(전부 코드로 재확인): `SupadataTranscriptClient`("Optional
+paid/vendor fallback", :19)가 무게이트 `POST /api/videos/import`에서 도달 가능;
+`user_entitlements` PK `(user_id, capability)`로는 sandbox/production 분리 불가; restore
+transfer 정책이 §15/§16 어디에도 미배정; `SparringClient.assertAllowed`(SPARRING_NOT_ALLOWED)
+휴면 게이트와 `DeckController` 개인 쓰기가 문서에 0회 등장.
+
+**Fix.** `docs/MONETIZATION-DESIGN.md`에 13건 전부 반영(+102/−13): 복합 PK
+`(user_id, capability, source, environment)` + PRODUCTION-only 접근 규칙 + 단조 스냅샷(§6.1),
+legacy `plan` 매핑 — `pro`는 AI_ACCESS 활성 시만(§6.3), deck/library/import Shadow 게이트(§7.2),
+restore keep-with-original 기본값(§0.1/§11.2/§15/§16), admin grant 수명주기 provider=ADMIN
+감사(§7.4), 집계 provider-call budget(§8.2/§8.3), guided sample→PAY-3, 구 webhook 제거→PAY-2.
+세션 문서 4종 현행화: `ROADMAP.md` 교체(구본 `docs/archive/ROADMAP-2026-05-tubeshadow-mvp.md`),
+`CLAUDE.md` 정체성·커밋 형식, `PROGRESS.md` 현재 상태 섹션, `BLOCKERS.md` B-002 추가.
+
+**Verification.** 반영 후 검증 에이전트 2개: 발견 13건 커버리지 **13/13 ok**, 신규 문서
+사실검증 **22건 중 21 ok** — 유일한 실패는 `b266e6b` 병합일 표기(7/18)로, 커밋 타임스탬프
+`2026-07-17T23:43:44-04:00`에 맞춰 7/17로 정정 후 커밋했다. grep 반영 마커 10종
+(SPARRING_NOT_ALLOWED 3, Supadata 7, 복합 PK 1 등) 전부 존재 확인.
+
+**Commit.** `e88cb87`(PAY-0.1 — 선-stage된 ROADMAP rename 포함), `ebdeb28`(guidance 4종).
+
+**Pattern.** 문서를 명세로 쓰는 순간 문서도 코드처럼 리뷰 대상이다. "사실 주장이 전부 참"과
+"설계가 완결"은 별개의 검증 축이고, 후자는 반박 시도(적대 검증)를 통과해야 신뢰할 수 있다.

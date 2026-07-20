@@ -1,0 +1,46 @@
+---
+title: "PAY-0.1 — 설계 문서를 적대 검증에 통과시킨 뒤에야 개발을 연다"
+date: "2026-07-20"
+project: "shadow-ai"
+kind: "monetization"
+visibility: "private"
+language: "ko"
+summary: "PAY-0 수익화 설계의 적대 검증(에이전트 69, 주장 25건 확인·발견 13건)을 문서에 전부 반영하고, 두 달 묵은 세션 필독 문서 4종을 Mimi 현행으로 교체했다. PAY-1 착수 가능 상태."
+tags: ["monetization", "entitlement", "design-review", "docs-hygiene"]
+---
+
+## 무엇을 했나
+
+Codex가 쓴 PAY-0 수익화 설계(`17702af`)를 그대로 믿지 않고 검증부터 했다. 리뷰어 8
+(코드 대조 4·설계 리뷰 3·외부 정책 웹 확인 1) + 발견별 3-렌즈 적대 refuter, 총 에이전트 69.
+
+결과: **문서의 사실 주장 25건은 전부 참** (V18 free/pro 제약, AiGate 호출부 11곳, webhook
+스켈레톤, Apple 3.1.1·Play Billing·RevenueCat·YouTube 정책 원문까지). 그러나 **설계 공백
+13건**(High 3)이 반박 검증을 살아남았다. 대표:
+
+- 유료 **Supadata 자막 벤더 경로**가 비용 경로 목록에서 누락 — Free 사용자가 무게이트
+  `POST /api/videos/import`로 벤더 크레딧을 태울 수 있는 구조
+- `user_entitlements` PK `(user_id, capability)`가 **sandbox/production 공존 불가** —
+  스스로 금지한 병합을 스키마가 강제
+- **restore/계정 이전 정책이 미결** — 스토어 계정 1개로 Mimi 계정 무한 순환 해제 가능
+
+## 반영 (PAY-0.1, `e88cb87`)
+
+복합 PK + PRODUCTION-only 접근 + 단조 스냅샷, legacy plan 매핑(`pro`=AI_ACCESS 활성 시만),
+deck/library/import Shadow 게이트, restore keep-with-original 기본값, admin grant 감사
+수명주기, 집계 provider-call budget, guided sample→PAY-3 배정, 구 webhook 제거→PAY-2 배정,
+SPARRING_NOT_ALLOWED 휴면 게이트 처분 명시. 반영 후 재검증: 커버리지 13/13, 사실검증 21/22
+(유일 실패였던 병합일 7/18→7/17 정정).
+
+## 곁가지: 필독 문서 부패 (`ebdeb28`)
+
+CLAUDE.md가 매 세션 강제로 읽히는 ROADMAP.md가 5/30에 멈춘 866줄짜리 "TubeShadow 24시간
+MVP"였다 — 두 파일 모두 Mimi 언급 0회. 새 세션마다 두 달 전 다른 이름의 제품 계획이
+주입되는 구조였다. 구본은 `docs/archive/`로 보존하고 ~80줄 현행 로드맵으로 교체,
+PROGRESS/BLOCKERS 현행화(B-002: EAS iOS 쿼터, 8/1 리셋).
+
+## 교훈
+
+AI가 쓴 명세는 "사실이 정확한가"와 "설계가 완결인가"를 따로 검증해야 한다. 전자가 25/25여도
+후자에서 13건이 나왔다. 그리고 세션 부트스트랩 문서는 코드보다 빨리 썩는다 — 읽기를 강제할
+거면 갱신도 강제해야 한다.
