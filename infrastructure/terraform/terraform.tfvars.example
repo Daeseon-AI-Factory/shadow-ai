@@ -9,8 +9,10 @@ gemini_api_key = "AIza...your-google-gemini-key..."
 # Only if you switch ai_provider to "claude":
 # anthropic_api_key = "sk-ant-..."
 
-# Only once you wire up payments (RevenueCat / web). Empty = the billing webhook stays disabled (503).
-# billing_webhook_secret = "a-long-random-shared-secret"
+# Once you wire up RevenueCat (PAY-2/PAY-4): REVENUECAT_API_KEY, REVENUECAT_WEBHOOK_AUTH_VALUE,
+# REVENUECAT_WEBHOOK_HMAC_SECRET. Not yet provisioned here — add alongside real RevenueCat
+# project credentials (docs/MONETIZATION-DESIGN.md §16). The old billing_webhook_secret variable
+# (generic payment-agnostic webhook) was removed when that endpoint was retired.
 
 # --- Overrides (optional — everything has a default) -------------------------------------------
 # project              = "tubeshadow"

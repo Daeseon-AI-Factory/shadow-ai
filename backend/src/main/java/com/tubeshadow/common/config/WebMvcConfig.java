@@ -2,6 +2,7 @@ package com.tubeshadow.common.config;
 
 import com.tubeshadow.auth.security.AuthRateLimitFilter;
 import com.tubeshadow.auth.security.CurrentUserArgumentResolver;
+import com.tubeshadow.billing.api.BillingSyncRateLimitInterceptor;
 import com.tubeshadow.practice.api.ComposeRateLimitInterceptor;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Configuration;
@@ -17,13 +18,16 @@ public class WebMvcConfig implements WebMvcConfigurer {
     private final CurrentUserArgumentResolver currentUserArgumentResolver;
     private final ObjectProvider<AuthRateLimitFilter> rateLimitInterceptor;
     private final ObjectProvider<ComposeRateLimitInterceptor> composeRateLimitInterceptor;
+    private final ObjectProvider<BillingSyncRateLimitInterceptor> billingSyncRateLimitInterceptor;
 
     public WebMvcConfig(CurrentUserArgumentResolver currentUserArgumentResolver,
                         ObjectProvider<AuthRateLimitFilter> rateLimitInterceptor,
-                        ObjectProvider<ComposeRateLimitInterceptor> composeRateLimitInterceptor) {
+                        ObjectProvider<ComposeRateLimitInterceptor> composeRateLimitInterceptor,
+                        ObjectProvider<BillingSyncRateLimitInterceptor> billingSyncRateLimitInterceptor) {
         this.currentUserArgumentResolver = currentUserArgumentResolver;
         this.rateLimitInterceptor = rateLimitInterceptor;
         this.composeRateLimitInterceptor = composeRateLimitInterceptor;
+        this.billingSyncRateLimitInterceptor = billingSyncRateLimitInterceptor;
     }
 
     @Override
@@ -54,6 +58,12 @@ public class WebMvcConfig implements WebMvcConfigurer {
                     "/api/practice/interview/mock",
                     "/api/practice/sparring/report",
                     "/api/practice/transcribe");
+        }
+        // /api/billing/sync triggers a live RevenueCat REST call — bound both per-user and
+        // aggregate spend (§8.3).
+        BillingSyncRateLimitInterceptor billingSync = billingSyncRateLimitInterceptor.getIfAvailable();
+        if (billingSync != null) {
+            registry.addInterceptor(billingSync).addPathPatterns("/api/billing/sync");
         }
     }
 }

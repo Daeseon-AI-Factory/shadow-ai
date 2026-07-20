@@ -3,8 +3,6 @@ package com.tubeshadow.billing.application;
 import com.tubeshadow.billing.domain.UserEntitlement;
 import com.tubeshadow.billing.domain.UserEntitlement.Capability;
 import com.tubeshadow.billing.domain.UserEntitlement.Environment;
-import com.tubeshadow.billing.domain.UserEntitlement.Source;
-import com.tubeshadow.billing.domain.UserEntitlement.Status;
 import com.tubeshadow.billing.repository.UserEntitlementRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -14,7 +12,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -98,47 +95,6 @@ public class EntitlementService {
     @Transactional(readOnly = true)
     public boolean has(UUID userId, Capability capability) {
         return snapshot(userId).has(capability);
-    }
-
-    /**
-     * Compatibility bridge for the generic set-plan webhook (§6.3): until PAY-2 retires that
-     * endpoint, a legacy {@code pro} decision must keep granting real capabilities, or a webhook
-     * upgrade would update {@code users.plan} that nothing reads anymore.
-     *
-     * <p>The webhook was the SOLE pre-PAY-1 authority, so any fresh legacy decision supersedes the
-     * V21 MIGRATION backfill: those rows are deactivated on every call. Otherwise a stale
-     * backfilled expiry would win via the latest-expiry rule — e.g. an operator shortening a
-     * user's expiry to August could never beat a backfilled September row, and a backfilled
-     * non-expiring row could never be limited at all. {@code pro} then upserts LEGACY_WEBHOOK rows
-     * for BOTH capabilities; {@code free} leaves everything legacy deactivated. REVENUECAT and
-     * ADMIN_GRANT rows are never touched from here (§6.1, §7.4).
-     */
-    @Transactional
-    public void applyLegacyPlanDecision(UUID userId, String plan, Instant validUntil) {
-        Instant now = Instant.now(clock);
-        boolean paid = !"free".equals(plan);
-        for (UserEntitlement row : repository.findByUserId(userId)) {
-            boolean superseded = row.getEnvironment() == environment
-                    && (row.getSource() == Source.MIGRATION
-                        || (!paid && row.getSource() == Source.LEGACY_WEBHOOK));
-            if (superseded) {
-                row.deactivate(now);
-            }
-        }
-        if (!paid) {
-            return;
-        }
-        for (Capability capability : Capability.values()) {
-            UserEntitlement.Key key =
-                    new UserEntitlement.Key(userId, capability, Source.LEGACY_WEBHOOK, environment);
-            Optional<UserEntitlement> existing = repository.findById(key);
-            if (existing.isPresent()) {
-                existing.get().update(Status.ACTIVE, validUntil, now);
-            } else {
-                repository.save(UserEntitlement.of(userId, capability, Source.LEGACY_WEBHOOK,
-                        environment, Status.ACTIVE, validUntil, now));
-            }
-        }
     }
 
     private static Instant laterOf(Instant a, Instant b) {

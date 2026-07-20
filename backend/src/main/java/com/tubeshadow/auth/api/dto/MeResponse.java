@@ -23,9 +23,13 @@ public record MeResponse(UUID id, String email, String displayName, Instant crea
         // solely for the PRO badge, and 'pro' would wrongly imply AI on not-yet-updated builds.
         String legacyPlan = snapshot.aiActive() ? "pro" : "free";
         return new MeResponse(user.getId(), user.getEmail(), user.getDisplayName(), user.getCreatedAt(),
-                legacyPlan, snapshot.aiExpiresAt(),
-                new Entitlements(
-                        new EntitlementState(snapshot.shadowActive(), snapshot.shadowExpiresAt()),
-                        new EntitlementState(snapshot.aiActive(), snapshot.aiExpiresAt())));
+                legacyPlan, snapshot.aiExpiresAt(), entitlementsOf(snapshot));
+    }
+
+    /** Shared with {@code POST /api/billing/sync} (§8.3: "returns the same entitlement shape as /me"). */
+    public static Entitlements entitlementsOf(EntitlementService.CapabilitySnapshot snapshot) {
+        return new Entitlements(
+                new EntitlementState(snapshot.shadowActive(), snapshot.shadowExpiresAt()),
+                new EntitlementState(snapshot.aiActive(), snapshot.aiExpiresAt()));
     }
 }

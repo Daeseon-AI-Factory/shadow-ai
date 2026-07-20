@@ -162,9 +162,3 @@ variable "anthropic_api_key" {
   default     = ""
 }
 
-variable "billing_webhook_secret" {
-  description = "Shared secret for the /api/billing/webhook endpoint. Empty = webhook disabled (503)."
-  type        = string
-  sensitive   = true
-  default     = ""
-}

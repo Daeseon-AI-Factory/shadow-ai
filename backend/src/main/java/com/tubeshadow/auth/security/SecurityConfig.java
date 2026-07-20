@@ -49,9 +49,11 @@ public class SecurityConfig {
                                 "/api/health",
                                 "/api/auth/signup",
                                 "/api/auth/login",
-                                // Server-to-server entitlement webhook: no JWT (caller is the billing
-                                // platform). Gated by a constant-time X-Billing-Secret check in the controller.
-                                "/api/billing/webhook",
+                                // Server-to-server entitlement webhook: no JWT (caller is RevenueCat).
+                                // Gated by a constant-time Authorization-header check + optional HMAC
+                                // signature verification in the controller (PAY-2, §8.2). Retires the
+                                // generic payment-agnostic /api/billing/webhook (§6.3 step 5).
+                                "/api/billing/revenuecat/webhook",
                                 // Static WebRTC bridge page for in-app sparring (inert without the
                                 // ephemeral secret the app injects; contains no data or secrets).
                                 "/sparring.html",

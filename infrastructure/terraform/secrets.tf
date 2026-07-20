@@ -88,13 +88,3 @@ resource "aws_secretsmanager_secret_version" "anthropic_api_key" {
   secret_id     = aws_secretsmanager_secret.anthropic_api_key[0].id
   secret_string = var.anthropic_api_key
 }
-
-resource "aws_secretsmanager_secret" "billing_webhook_secret" {
-  count = var.billing_webhook_secret != "" ? 1 : 0
-  name  = "${var.project}/billing-webhook-secret"
-}
-resource "aws_secretsmanager_secret_version" "billing_webhook_secret" {
-  count         = var.billing_webhook_secret != "" ? 1 : 0
-  secret_id     = aws_secretsmanager_secret.billing_webhook_secret[0].id
-  secret_string = var.billing_webhook_secret
-}

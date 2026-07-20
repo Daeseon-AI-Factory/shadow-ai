@@ -23,7 +23,6 @@ locals {
     aws_secretsmanager_secret.groq_api_key[*].arn,
     aws_secretsmanager_secret.openai_api_key[*].arn,
     aws_secretsmanager_secret.anthropic_api_key[*].arn,
-    aws_secretsmanager_secret.billing_webhook_secret[*].arn,
   )
 }
 
