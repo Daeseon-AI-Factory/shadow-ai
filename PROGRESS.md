@@ -1,7 +1,20 @@
 # 진행 상황
 
 > Claude Code 자율 실행 트래커
-> 최종 갱신: 2026-05-24 02:25 KST
+> 최종 갱신: 2026-07-20
+
+## 현재 상태 (2026-07-20) — 여기부터 읽기
+
+- **main**: 7월 모바일 작업 전체 통합본 (`b266e6b`, 7/17 병합 — redesign R1–R4, UX U1–U4,
+  realtime sparring, verbs, android-readiness, m-menu). 롤백점 `backup/main-pre-integration`.
+- **TestFlight**: build 18 (7/9 빌드, 통합 전 커밋 3c10afc) — 7월 작업 미반영.
+  EAS Free 플랜 iOS 쿼터 소진, 2026-08-01 리셋 (B-002).
+- **PAY-0 완료**: `docs/MONETIZATION-DESIGN.md` 커밋(`17702af`) → 적대 검증 리뷰
+  (저장소 상태·외부 정책 주장 25건 전부 확인, 설계 발견 13건) → PAY-0.1로 13건 반영 +
+  세션 문서 4종(ROADMAP/CLAUDE/PROGRESS/BLOCKERS) 현행화.
+- **다음**: PAY-1 — capability core (`user_entitlements` + `AccessPolicy`) + 클립 자동분석·
+  regenerate AI gate 봉합. 명세: `docs/MONETIZATION-DESIGN.md` §14.
+- 아래 섹션들은 2026-05~07의 완료 역사다. 실행 지침으로 읽지 말 것.
 
 ## 전체 상태
 - **STAGE 0~9: 69개 태스크 모두 완료** ✅
@@ -119,9 +132,12 @@ STAGE 0~9의 69개 태스크는 모두 완료. 자세한 내역은 git log 또�
 - Docker 이미지: `docker build -t tubeshadow-backend ./backend`
 
 ## 활성 블로커
-- [B-001](./BLOCKERS.md) YouTube 자막 추출 ToS 회색 — 본인 학습 MVP는 OK, 상용 시 검토
+- [B-001](./BLOCKERS.md) YouTube 자막 추출 ToS 회색 — 공개 유료 출시 launch gate로 공식화
+  (`docs/MONETIZATION-DESIGN.md` §4.2, PAY-6)
+- [B-002](./BLOCKERS.md) EAS Free 플랜 iOS 빌드 월 쿼터 소진 — 2026-08-01 리셋,
+  우회는 `eas build --local`
 
-## 다음 세션 권장
+## 다음 세션 권장 (2026-05 시점 — 역사)
 1. `curated-videos.yml`에 검증된 ~30개 영상 추가 (현재 starter 4개)
 2. ANTHROPIC_API_KEY 설정 후 실제 분석 5건 수동 검수
 3. Vercel + Railway 배포 → 종단간 스모크

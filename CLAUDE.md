@@ -13,9 +13,13 @@
 
 ## 1. 프로젝트 정체성
 
-- **이름**: TubeShadow
-- **목적**: 개발자/지식노동자를 위한 YouTube 기반 영어 쉐도잉 + Sentence Mining 학습 도구
-- **자세한 내용**: `ROADMAP.md` 섹션 0 참조
+- **이름**: Mimi (구명 TubeShadow — repo·백엔드 패키지 `com.tubeshadow`는 내부명으로 유지)
+- **목적**: 개발자/지식노동자를 위한 YouTube 기반 영어 쉐도잉 훈련 도구.
+  파는 것은 훈련 워크플로(구간 반복·녹음·A/B 비교·저장·복습)이며 YouTube 시청권이 아니다.
+- **수익화**: 한 앱에서 Free Preview → Shadow → AI 3단계.
+  유료화(PAY 트랙) 작업의 진실의 원천은 `docs/MONETIZATION-DESIGN.md`
+- **자세한 내용**: `ROADMAP.md` 섹션 0 참조 (2026-07-20 현행화 — 구 24시간 MVP 로드맵은
+  `docs/archive/`로 이동)
 
 ## 2. 핵심 작업 원칙
 
@@ -45,7 +49,8 @@
 - 컴포넌트는 `'use client'` 필요한 곳만 명시
 
 ### 공통
-- 커밋 메시지: `[T-XXX] <짧은 설명>` 형식
+- 커밋 메시지: `[<트랙ID>] <짧은 설명>` 형식 — 현행 트랙 ID는 `PAY-N`
+  (`docs/MONETIZATION-DESIGN.md` §14). 구 `T-XXX` 체계는 완료된 역사
 - 한 태스크 = 1~3 커밋
 - 의미 있는 단위로 자주 커밋
 - 절대 API 키 / 시크릿 하드코딩 X (환경변수만)
