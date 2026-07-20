@@ -1,0 +1,47 @@
+---
+title: "PAY-1 — free/pro 한 칸을 capability 테이블로 교체하고 AI 비용 구멍을 막다"
+date: "2026-07-20"
+project: "shadow-ai"
+kind: "tech-retro"
+visibility: "public"
+language: "ko"
+summary: "user_entitlements 복합 PK + AccessPolicy 중앙 판정으로 SHADOW/AI 접근을 분리하고, 클립 자동분석·regenerate·유료 벤더 경로의 게이트 구멍을 봉합했다. 193개 테스트 green, 적대 리뷰 10건 반영."
+tags: ["entitlement", "spring-boot", "monetization", "testing", "code-review"]
+---
+
+## 무엇이 문제였나
+
+가격제가 `users.plan` 문자열 한 칸이었다. `AiGate`는 "free가 아니면 통과"라서 Shadow 티어를
+추가하는 순간 Shadow가 AI까지 열리고, 클립 자동분석(`onClipCreated`)과 재생성은 게이트 자체가
+없어 무료 계정으로도 모델 비용이 나갔다. deck·library·video import(유료 자막 벤더 폴백 포함)도
+전부 무게이트.
+
+## 무엇을 했나
+
+- `user_entitlements` — PK `(user_id, capability, source, environment)`. sandbox 행은 프로덕션
+  서버에서 절대 권한을 주지 않고, RevenueCat 스냅샷이 admin grant를 덮어쓸 수 없는 구조를
+  스키마가 강제한다. V21 백필로 기존 pro는 양쪽 capability 유지.
+- `AccessPolicy.requireShadow/requireAi` 단일 결정점. AiGate는 호출부 11곳을 그대로 둔 채
+  내부만 위임으로 교체 — 클라이언트가 아는 `AI_NOT_ALLOWED` 계약 유지.
+- 자동분석은 AI 권한 없으면 **행을 만들지 않고** 스킵 — Shadow 사용자가 영원한 PENDING
+  스피너를 보는 상태를 원천 차단. regenerate는 기존 분석을 지우기 **전에** 게이트.
+- `/me`에 additive `entitlements` 블록. legacy `plan`은 AI_ACCESS 활성 시만 'pro' —
+  구버전 앱의 PRO 뱃지가 AI를 함의하기 때문.
+
+## 배운 것
+
+1. **@Transactional 테스트에서 JPA와 raw JDBC를 섞으면 양방향으로 속는다.** JDBC
+   `INSERT...SELECT`는 미flush된 JPA 행을 못 보고(13개 테스트 위양성 403), JDBC UPDATE 후
+   JPQL은 1차 캐시의 낡은 엔티티를 돌려준다(다운그레이드가 201). auto-flush는 JPQL에만
+   발동한다는 걸 몸으로 배움.
+2. **적대 리뷰는 green 뒤에도 값을 낸다.** 188/188 통과 상태에서 3-렌즈 리뷰가 10건을
+   찾았고, 그중 "legacy webhook이 백필 만료를 단축 못 하는" 진짜 시맨틱 버그와 "테스트가
+   전부 entitled 사용자라 읽기 보존·백필이 무검증"이라는 커버리지 구멍이 나왔다. V21 백필은
+   마이그레이션 파일의 SQL을 테스트가 직접 실행해서 검증하게 했다.
+3. **게이트 검증 기준은 위치다** — "붙어 있다"가 아니라 "비용/부작용 확정 전 지점에 있다".
+
+## 남은 것
+
+배포 게이트 B-003: 배포된 앱은 `SHADOW_REQUIRED`를 몰라 무한 재시도 알림에 빠진다 —
+PAY-3(paywall) 전 프로덕션 배포 금지. 다음은 PAY-2(RevenueCat adapter), 오너의 RevenueCat
+자격정보 입력이 선행 조건.

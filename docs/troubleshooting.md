@@ -2940,3 +2940,45 @@ restore keep-with-original 기본값(§0.1/§11.2/§15/§16), admin grant 수명
 
 **Pattern.** 문서를 명세로 쓰는 순간 문서도 코드처럼 리뷰 대상이다. "사실 주장이 전부 참"과
 "설계가 완결"은 별개의 검증 축이고, 후자는 반박 시도(적대 검증)를 통과해야 신뢰할 수 있다.
+<!-- skipped: 226e948 docs(log): record PAY-0.1 review integration and guidance refresh (e88cb87, ebdeb28) [no-log] -->
+
+---
+
+## 2026-07-20 — PAY-1: capability 중앙 판정 구현 + 게이트 구멍 봉합
+
+**Symptom.** `free/pro` 한 칸 판정의 알려진 구멍들: `ClipAnalysisService.onClipCreated`와
+`regenerate`가 AiGate 없이 모델 비용을 실행, deck/library/import 등 유료 쓰기가 무게이트,
+`plan != 'free'` 확장 시 Shadow가 AI까지 열리는 구조 (운영 메모리 이슈 2건 + PAY-0 검증 발견).
+
+**Fix.** `user_entitlements`(V21, PK user_id+capability+source+environment) + `EntitlementService`
+/`AccessPolicy` 중앙 판정. AiGate는 호출부 11곳 무변경 위임 전환. 자동분석은 AI 권한 없으면
+행 없이 스킵(영원한 PENDING 방지), regenerate는 삭제 전 게이트. Shadow 게이트 8종 추가.
+`/me`에 additive `entitlements` 블록, legacy plan은 AI_ACCESS 활성 시만 'pro'.
+휴면 `SparringClient.assertAllowed` 삭제. 상세는 커밋 메시지와 MONETIZATION-DESIGN §6·§7 참조.
+
+**과정의 함정 2개 (재발 주의).**
+1. `@Transactional` 통합 테스트에서 JdbcTemplate `INSERT ... SELECT FROM users`가 0행 삽입 —
+   signup의 users 행이 아직 미flush(JPA auto-flush는 JPQL에만 발동). 13개 테스트가 403으로
+   실패. 수정: JPA 조회로 auto-flush 유도 후 명시적 id로 JDBC 삽입.
+2. 같은 테스트 패턴에서 JDBC UPDATE 후 JPQL 재조회가 1차 캐시의 낡은 엔티티를 반환(다운그레이드
+   테스트가 201). 수정: `em.flush(); em.clear()` — 프로덕션은 요청별 새 영속성 컨텍스트라 무관.
+
+**Review.** diff 적대 리뷰(3-렌즈, 에이전트 3)가 10건 반환 → 코드 수정 4건(LEGACY_WEBHOOK 소스
+분리로 미래 ADMIN_GRANT 충돌 제거, legacy 결정이 MIGRATION 백필을 supersede — 만료 단축 불가
+버그, allowlist를 `/me` effectiveSnapshot에 반영), 테스트 보강 4건(V21 백필 SQL 실행 검증,
+다운그레이드 후 읽기 보존, Shadow-only legacy 매핑, 풀스택 SHADOW_REQUIRED), 문서화 2건(B-003
+배포 게이트).
+
+**Verification.**
+```
+./gradlew test → BUILD SUCCESSFUL in 33s
+XML 집계: tests=193 failures=0 errors=0 skipped=0
+```
+[unverified]: 실기기/시뮬레이터 종단간, 프로덕션 유사 DB 백필 리허설(§15 게이트), sandbox 결제.
+
+**Commit.** `1688368`.
+
+**Pattern.** 게이트는 "컨트롤러에 붙였다"가 아니라 "비용이 확정되기 전 지점에 있다"로 검증한다
+— 이번에 regenerate는 삭제 전, 자동분석은 행 생성 전에 게이트를 놓아야 스피너·삭제 부작용이
+안 남는다. 그리고 @Transactional 테스트에서 JPA와 raw JDBC를 섞으면 flush/1차 캐시 양방향으로
+속는다.
