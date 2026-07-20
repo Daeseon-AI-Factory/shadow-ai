@@ -22,6 +22,17 @@
 - **해제**: 2026-08-01 쿼터 리셋 대기, 또는 `eas build --local`(크레딧 0).
   상세: `docs/troubleshooting.md` 2026-07-18 항목
 
+### B-003 (2026-07-20) — 릴리스 게이트: PAY-1 백엔드는 PAY-3 전 프로덕션 배포 금지
+- **상황**: PAY-1이 Shadow 쓰기(클립 생성/편집, 녹음 업로드, SRS 채점, rep, 덱/라이브러리, 임포트)에
+  `403 SHADOW_REQUIRED` 게이트를 추가함. 배포된 모바일 빌드는 이 코드를 모른다 —
+  `AI_NOT_ALLOWED`/`SPARRING_NOT_ALLOWED`만 처리(mobile compose.tsx:48, sparring.tsx:55).
+- **영향**: allowlist에 없는 계정은 배포 즉시 핵심 드릴/저장 루프가 무한 재시도 알림으로 깨짐
+  (drill-runner.tsx onError). paywall은 PAY-3에서 오므로 그 전 배포는 무료 사용자 전원 차단.
+- **완화**: 배포는 수동 트리거(.github/workflows/deploy.yml)라 merge≠배포. 서버 기존 유료(pro)
+  사용자는 V21 백필로 양쪽 capability 유지.
+- **해제 조건**: PAY-3 클라이언트(SHADOW_REQUIRED→paywall 라우팅) 배포와 함께, 또는 오너가
+  명시 승인한 롤아웃 플랜과 함께만 프로덕션 배포.
+
 ## 해결됨
 
 (없음)

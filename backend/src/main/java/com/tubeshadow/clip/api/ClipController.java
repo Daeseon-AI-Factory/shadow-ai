@@ -6,6 +6,7 @@ import com.tubeshadow.clip.api.dto.ClipCreateRequest;
 import com.tubeshadow.clip.api.dto.ClipPageResponse;
 import com.tubeshadow.clip.api.dto.ClipResponse;
 import com.tubeshadow.clip.api.dto.ClipUpdateRequest;
+import com.tubeshadow.billing.application.AccessPolicy;
 import com.tubeshadow.clip.application.ClipService;
 import com.tubeshadow.common.web.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
@@ -37,15 +38,18 @@ import java.util.UUID;
 public class ClipController {
 
     private final ClipService clipService;
+    private final AccessPolicy accessPolicy;
 
-    public ClipController(ClipService clipService) {
+    public ClipController(ClipService clipService, AccessPolicy accessPolicy) {
         this.clipService = clipService;
+        this.accessPolicy = accessPolicy;
     }
 
     @PostMapping
     @Operation(summary = "클립 저장")
     public ResponseEntity<ApiResponse<ClipResponse>> create(@Valid @RequestBody ClipCreateRequest request,
                                                             @CurrentUser AuthenticatedUser user) {
+        accessPolicy.requireShadow(user.id());
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.ok(clipService.create(user.id(), request)));
     }
@@ -80,6 +84,7 @@ public class ClipController {
     public ApiResponse<ClipResponse> update(@PathVariable UUID id,
                                             @Valid @RequestBody ClipUpdateRequest request,
                                             @CurrentUser AuthenticatedUser user) {
+        accessPolicy.requireShadow(user.id());
         return ApiResponse.ok(clipService.update(user.id(), id, request));
     }
 

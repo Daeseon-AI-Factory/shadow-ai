@@ -19,9 +19,11 @@ import java.util.UUID;
 public class BillingService {
 
     private final UserRepository userRepository;
+    private final EntitlementService entitlementService;
 
-    public BillingService(UserRepository userRepository) {
+    public BillingService(UserRepository userRepository, EntitlementService entitlementService) {
         this.userRepository = userRepository;
+        this.entitlementService = entitlementService;
     }
 
     @Transactional
@@ -30,6 +32,10 @@ public class BillingService {
                 .orElseThrow(() -> new NotFoundException("USER_NOT_FOUND",
                         "No user for billing entitlement: " + userId));
         user.applyPlan(plan, validUntil, customerId);
+        // PAY-1 bridge: access decisions read user_entitlements now, so a legacy plan decision must
+        // also grant/revoke capabilities or this webhook would silently stop working. PAY-2 retires
+        // the whole endpoint (docs/MONETIZATION-DESIGN.md §6.3 step 5).
+        entitlementService.applyLegacyPlanDecision(userId, plan, validUntil);
         return userRepository.save(user);
     }
 }

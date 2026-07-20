@@ -66,9 +66,57 @@ class BillingControllerTest extends SpringIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.plan").value("pro"));
 
-        // after: /me shows pro
+        // after: /me shows pro AND the PAY-1 capability bridge granted both entitlements
         mockMvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + acct.token()))
-                .andExpect(jsonPath("$.data.plan").value("pro"));
+                .andExpect(jsonPath("$.data.plan").value("pro"))
+                .andExpect(jsonPath("$.data.entitlements.shadow.active").value(true))
+                .andExpect(jsonPath("$.data.entitlements.ai.active").value(true));
+    }
+
+    @Test
+    void legacyDecisionSupersedesTheMigrationBackfill() throws Exception {
+        Account acct = signup("supersede@example.com");
+        // Simulate a V21-backfilled user: non-expiring MIGRATION rows for both capabilities.
+        grantPaidCapabilities("supersede@example.com");
+        mockMvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + acct.token()))
+                .andExpect(jsonPath("$.data.entitlements.ai.active").value(true));
+
+        // Operator shortens the entitlement to an already-lapsed date. The stale backfill row must
+        // NOT keep granting via the latest-expiry rule.
+        mockMvc.perform(post("/api/billing/webhook")
+                        .header("X-Billing-Secret", SECRET)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(webhookBody(acct.userId(), "pro", "2000-01-01T00:00:00Z")))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + acct.token()))
+                .andExpect(jsonPath("$.data.plan").value("free"))
+                .andExpect(jsonPath("$.data.entitlements.shadow.active").value(false))
+                .andExpect(jsonPath("$.data.entitlements.ai.active").value(false));
+    }
+
+    @Test
+    void downgradeToFreeRevokesCapabilities() throws Exception {
+        Account acct = signup("downgrade@example.com");
+
+        mockMvc.perform(post("/api/billing/webhook")
+                        .header("X-Billing-Secret", SECRET)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(webhookBody(acct.userId(), "pro", null)))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + acct.token()))
+                .andExpect(jsonPath("$.data.entitlements.ai.active").value(true));
+
+        mockMvc.perform(post("/api/billing/webhook")
+                        .header("X-Billing-Secret", SECRET)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(webhookBody(acct.userId(), "free", null)))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + acct.token()))
+                .andExpect(jsonPath("$.data.plan").value("free"))
+                .andExpect(jsonPath("$.data.entitlements.shadow.active").value(false))
+                .andExpect(jsonPath("$.data.entitlements.ai.active").value(false));
     }
 
     @Test
@@ -82,7 +130,8 @@ class BillingControllerTest extends SpringIntegrationTest {
                 .andExpect(status().isOk());
 
         mockMvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + acct.token()))
-                .andExpect(jsonPath("$.data.plan").value("free"));
+                .andExpect(jsonPath("$.data.plan").value("free"))
+                .andExpect(jsonPath("$.data.entitlements.ai.active").value(false));
     }
 
     @Test

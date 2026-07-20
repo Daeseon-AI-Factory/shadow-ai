@@ -121,6 +121,7 @@ class ClipServiceTest extends SpringIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isCreated());
+        grantPaidCapabilities(email);
         return userRepository.findByEmail(email).orElseThrow();
     }
 

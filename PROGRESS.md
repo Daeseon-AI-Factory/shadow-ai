@@ -12,8 +12,15 @@
 - **PAY-0 완료**: `docs/MONETIZATION-DESIGN.md` 커밋(`17702af`) → 적대 검증 리뷰
   (저장소 상태·외부 정책 주장 25건 전부 확인, 설계 발견 13건) → PAY-0.1로 13건 반영 +
   세션 문서 4종(ROADMAP/CLAUDE/PROGRESS/BLOCKERS) 현행화.
-- **다음**: PAY-1 — capability core (`user_entitlements` + `AccessPolicy`) + 클립 자동분석·
-  regenerate AI gate 봉합. 명세: `docs/MONETIZATION-DESIGN.md` §14.
+- **PAY-1 완료 (2026-07-20)**: `user_entitlements`(V21, 복합 PK) + `EntitlementService`/`AccessPolicy`
+  중앙 판정, AiGate 위임 전환, 클립 자동분석·regenerate AI gate 봉합, Shadow 게이트 8종
+  (clip·recording·review·rep/grade·deck·library·import), `/me` entitlements 블록 + legacy plan
+  매핑, legacy webhook 브리지. 백엔드 테스트 193/193 green. diff 적대 리뷰 10건 발견 → 4건
+  코드 수정·4건 테스트 보강·2건 문서화(B-003) 반영.
+- **주의(B-003)**: 이 백엔드는 PAY-3 클라이언트(paywall + SHADOW_REQUIRED 처리) 전에
+  프로덕션 배포 금지 — 배포된 앱은 새 403 코드를 모른다.
+- **다음**: PAY-2 — provider adapter + RevenueCat snapshot/webhook/sync + 구 webhook 제거.
+  선행 오너 입력: RevenueCat 프로젝트/자격정보 (`docs/MONETIZATION-DESIGN.md` §16).
 - 아래 섹션들은 2026-05~07의 완료 역사다. 실행 지침으로 읽지 말 것.
 
 ## 전체 상태
@@ -136,6 +143,7 @@ STAGE 0~9의 69개 태스크는 모두 완료. 자세한 내역은 git log 또�
   (`docs/MONETIZATION-DESIGN.md` §4.2, PAY-6)
 - [B-002](./BLOCKERS.md) EAS Free 플랜 iOS 빌드 월 쿼터 소진 — 2026-08-01 리셋,
   우회는 `eas build --local`
+- [B-003](./BLOCKERS.md) 릴리스 게이트 — PAY-1 백엔드는 PAY-3 클라이언트 전 프로덕션 배포 금지
 
 ## 다음 세션 권장 (2026-05 시점 — 역사)
 1. `curated-videos.yml`에 검증된 ~30개 영상 추가 (현재 starter 4개)

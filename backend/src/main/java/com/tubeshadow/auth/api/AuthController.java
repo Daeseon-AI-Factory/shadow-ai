@@ -12,6 +12,7 @@ import com.tubeshadow.auth.domain.User;
 import com.tubeshadow.auth.repository.UserRepository;
 import com.tubeshadow.auth.security.AuthenticatedUser;
 import com.tubeshadow.auth.security.CurrentUser;
+import com.tubeshadow.billing.application.AccessPolicy;
 import com.tubeshadow.common.exception.NotFoundException;
 import com.tubeshadow.common.web.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
@@ -35,10 +36,13 @@ public class AuthController {
 
     private final AuthService authService;
     private final UserRepository userRepository;
+    private final AccessPolicy accessPolicy;
 
-    public AuthController(AuthService authService, UserRepository userRepository) {
+    public AuthController(AuthService authService, UserRepository userRepository,
+                          AccessPolicy accessPolicy) {
         this.authService = authService;
         this.userRepository = userRepository;
+        this.accessPolicy = accessPolicy;
     }
 
     @PostMapping("/signup")
@@ -58,7 +62,9 @@ public class AuthController {
     public ApiResponse<MeResponse> me(@CurrentUser AuthenticatedUser user) {
         User loaded = userRepository.findById(user.id())
                 .orElseThrow(() -> new NotFoundException("USER_NOT_FOUND", "User not found"));
-        return ApiResponse.ok(MeResponse.from(loaded));
+        // effectiveSnapshot, not the raw rows: /me must report what the gates actually decide,
+        // including the owner/tester allowlist overlay (§7.4 inspectability).
+        return ApiResponse.ok(MeResponse.from(loaded, accessPolicy.effectiveSnapshot(user.id())));
     }
 
     @PatchMapping("/me")

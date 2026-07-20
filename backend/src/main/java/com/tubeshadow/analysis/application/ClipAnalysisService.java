@@ -4,6 +4,7 @@ import com.tubeshadow.analysis.domain.ClipAnalysis;
 import com.tubeshadow.analysis.infrastructure.AiAnalysisClient;
 import com.tubeshadow.analysis.infrastructure.AiAnalysisResult;
 import com.tubeshadow.analysis.repository.ClipAnalysisRepository;
+import com.tubeshadow.billing.application.AccessPolicy;
 import com.tubeshadow.clip.application.ClipCreatedEvent;
 import com.tubeshadow.clip.application.ClipDeletedEvent;
 import com.tubeshadow.clip.domain.Clip;
@@ -41,17 +42,20 @@ public class ClipAnalysisService {
     private final ClipAnalysisRepository analysisRepository;
     private final AiAnalysisClient aiClient;
     private final MeterRegistry meterRegistry;
+    private final AccessPolicy accessPolicy;
     private final org.springframework.beans.factory.ObjectProvider<ClipAnalysisService> selfProvider;
 
     public ClipAnalysisService(ClipRepository clipRepository,
                                ClipAnalysisRepository analysisRepository,
                                AiAnalysisClient aiClient,
                                MeterRegistry meterRegistry,
+                               AccessPolicy accessPolicy,
                                org.springframework.beans.factory.ObjectProvider<ClipAnalysisService> selfProvider) {
         this.clipRepository = clipRepository;
         this.analysisRepository = analysisRepository;
         this.aiClient = aiClient;
         this.meterRegistry = meterRegistry;
+        this.accessPolicy = accessPolicy;
         this.selfProvider = selfProvider;
     }
 
@@ -62,6 +66,13 @@ public class ClipAnalysisService {
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     @Async
     public void onClipCreated(ClipCreatedEvent event) {
+        // PAY-1 (docs/MONETIZATION-DESIGN.md §7.3): automatic analysis is a model cost and must not
+        // run for users without AI access. Deliberately NO analysis row is created — a Shadow user
+        // must never see an eternal PENDING spinner, and reads keep returning ANALYSIS_NOT_FOUND.
+        if (!accessPolicy.canUseAi(event.userId())) {
+            log.info("Skip auto-analysis for clip {}: user {} has no AI access", event.clipId(), event.userId());
+            return;
+        }
         runAnalysisPipeline(event.clipId());
     }
 
@@ -156,6 +167,8 @@ public class ClipAnalysisService {
 
     @Transactional
     public ClipAnalysis regenerate(UUID userId, UUID clipId) {
+        // PAY-1: regeneration re-commits a model cost — gate it BEFORE deleting anything (§7.3).
+        accessPolicy.requireAi(userId);
         Clip clip = clipRepository.findByIdAndUserId(clipId, userId)
                 .orElseThrow(() -> new NotFoundException("CLIP_NOT_FOUND", "Clip not found"));
         analysisRepository.deleteByClipId(clipId);

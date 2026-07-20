@@ -8,5 +8,5 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * gpt-realtime-mini via SPARRING_MODEL to trade some quality for ~1/3 the per-minute cost.
  */
 @ConfigurationProperties(prefix = "tubeshadow.sparring")
-public record SparringProperties(String apiKey, String baseUrl, String model, String voice, String allowedEmails) {
+public record SparringProperties(String apiKey, String baseUrl, String model, String voice) {
 }

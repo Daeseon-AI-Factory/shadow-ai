@@ -2,6 +2,7 @@ package com.tubeshadow.deck.api;
 
 import com.tubeshadow.auth.security.AuthenticatedUser;
 import com.tubeshadow.auth.security.CurrentUser;
+import com.tubeshadow.billing.application.AccessPolicy;
 import com.tubeshadow.clip.repository.ClipRepository;
 import com.tubeshadow.common.web.ApiResponse;
 import com.tubeshadow.deck.api.dto.DeckRequest;
@@ -37,10 +38,13 @@ public class DeckController {
 
     private final DeckService deckService;
     private final ClipRepository clipRepository;
+    private final AccessPolicy accessPolicy;
 
-    public DeckController(DeckService deckService, ClipRepository clipRepository) {
+    public DeckController(DeckService deckService, ClipRepository clipRepository,
+                          AccessPolicy accessPolicy) {
         this.deckService = deckService;
         this.clipRepository = clipRepository;
+        this.accessPolicy = accessPolicy;
     }
 
     @PostMapping
@@ -48,6 +52,7 @@ public class DeckController {
     public ResponseEntity<ApiResponse<DeckResponse>> create(
             @Valid @RequestBody DeckRequest req,
             @CurrentUser AuthenticatedUser user) {
+        accessPolicy.requireShadow(user.id());
         Deck deck = deckService.create(user.id(), req.name(), req.description());
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.ok(DeckResponse.from(deck, 0)));
@@ -71,6 +76,7 @@ public class DeckController {
     public ApiResponse<DeckResponse> rename(@PathVariable UUID deckId,
                                             @Valid @RequestBody DeckRequest req,
                                             @CurrentUser AuthenticatedUser user) {
+        accessPolicy.requireShadow(user.id());
         Deck deck = deckService.rename(user.id(), deckId, req.name());
         long count = clipRepository.countByUserIdAndDeckId(user.id(), deck.getId());
         return ApiResponse.ok(DeckResponse.from(deck, count));
@@ -89,6 +95,7 @@ public class DeckController {
     public ResponseEntity<Void> moveClip(@PathVariable UUID clipId,
                                          @RequestBody MoveClipRequest req,
                                          @CurrentUser AuthenticatedUser user) {
+        accessPolicy.requireShadow(user.id());
         deckService.moveClip(user.id(), clipId, req.deckId());
         return ResponseEntity.noContent().build();
     }

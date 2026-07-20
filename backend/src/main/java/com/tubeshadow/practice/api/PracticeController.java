@@ -30,6 +30,7 @@ import com.tubeshadow.practice.api.dto.SparringSessionResponse;
 import com.tubeshadow.practice.api.dto.SparringReportRequest;
 import com.tubeshadow.practice.api.dto.SparringReportResponse;
 import com.tubeshadow.practice.api.dto.TranscribeResponse;
+import com.tubeshadow.billing.application.AccessPolicy;
 import com.tubeshadow.practice.application.AiGate;
 import com.tubeshadow.practice.application.CompositionService;
 import com.tubeshadow.practice.infrastructure.SparringClient;
@@ -72,11 +73,12 @@ public class PracticeController {
     private final TranscriptionClient transcriptionClient;
     private final SparringClient sparringClient;
     private final AiGate aiGate;
+    private final AccessPolicy accessPolicy;
 
     public PracticeController(PracticeProgressService service, PracticeSrsService srsService,
                              CompositionService compositionService, TransformService transformService,
                              SeedService seedService, TranscriptionClient transcriptionClient,
-                             SparringClient sparringClient, AiGate aiGate) {
+                             SparringClient sparringClient, AiGate aiGate, AccessPolicy accessPolicy) {
         this.service = service;
         this.srsService = srsService;
         this.compositionService = compositionService;
@@ -85,6 +87,7 @@ public class PracticeController {
         this.transcriptionClient = transcriptionClient;
         this.sparringClient = sparringClient;
         this.aiGate = aiGate;
+        this.accessPolicy = accessPolicy;
     }
 
     @GetMapping("/progress")
@@ -100,6 +103,8 @@ public class PracticeController {
     public ApiResponse<PracticeProgressResponse> rep(
             @CurrentUser AuthenticatedUser user,
             @RequestBody(required = false) PracticeRepRequest request) {
+        // PAY-1: recording paid practice progression is Shadow work (§7.2); reads stay open.
+        accessPolicy.requireShadow(user.id());
         LocalDate today = (request != null && request.localDate() != null) ? request.localDate() : LocalDate.now();
         return ApiResponse.ok(service.recordRep(user.id(), today));
     }
@@ -114,6 +119,7 @@ public class PracticeController {
     @Operation(summary = "드릴 카드 1장 채점 — Leitner 갱신 + 오늘 1회 반복 기록")
     public ApiResponse<GradeResponse> grade(@CurrentUser AuthenticatedUser user,
                                             @Valid @RequestBody GradeRequest request) {
+        accessPolicy.requireShadow(user.id());
         LocalDate today = request.localDate() != null ? request.localDate() : LocalDate.now();
         PracticeCardResponse card = srsService.grade(user.id(), request.cardKey(), request.correct(), today);
         PracticeProgressResponse progress = service.recordRep(user.id(), today);

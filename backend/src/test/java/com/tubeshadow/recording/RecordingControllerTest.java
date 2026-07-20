@@ -116,6 +116,7 @@ class RecordingControllerTest extends SpringIntegrationTest {
                 "email", "rec@example.com", "password", "passpass1", "displayName", "Rec"));
         mockMvc.perform(post("/api/auth/signup").contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isCreated());
+        grantPaidCapabilities("rec@example.com");
         return userRepository.findByEmail("rec@example.com").orElseThrow();
     }
 
@@ -124,6 +125,7 @@ class RecordingControllerTest extends SpringIntegrationTest {
                 "email", "rec2@example.com", "password", "passpass2", "displayName", "Rec2"));
         mockMvc.perform(post("/api/auth/signup").contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isCreated());
+        grantPaidCapabilities("rec2@example.com");
         return userRepository.findByEmail("rec2@example.com").orElseThrow();
     }
 

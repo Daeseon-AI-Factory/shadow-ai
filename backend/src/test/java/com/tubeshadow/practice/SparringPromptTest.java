@@ -43,26 +43,16 @@ class SparringPromptTest {
         assertThat(SparringPrompt.build("whatever", null)).isEqualTo(SparringPrompt.CHAT_PERSONA);
     }
 
-    private SparringClient clientWithAllowlist(String allowed) {
-        return new SparringClient(
-                new SparringProperties("key", "https://api.openai.com", "gpt-realtime", "marin", allowed),
+    // PAY-1: the SparringClient email allowlist (assertAllowed / SPARRING_NOT_ALLOWED) was removed —
+    // realtime minting is gated solely by AccessPolicy.requireAi at the controller (see AiGateTest).
+
+    @Test
+    void mintingWithoutAnApiKeyFailsClosed() {
+        SparringClient c = new SparringClient(
+                new SparringProperties("", "https://api.openai.com", "gpt-realtime", "marin"),
                 new ObjectMapper());
-    }
-
-    @Test
-    void allowlistBlocksEveryoneWhenBlank() {
-        SparringClient c = clientWithAllowlist("");
-        assertThatThrownBy(() -> c.assertAllowed("anyone@example.com"))
-                .isInstanceOf(BusinessException.class); // deny-by-default
-    }
-
-    @Test
-    void allowlistPermitsListedEmailCaseInsensitively() {
-        SparringClient c = clientWithAllowlist("owner@example.com, second@example.com");
-        assertThatCode(() -> c.assertAllowed("Owner@Example.com")).doesNotThrowAnyException();
-        assertThatThrownBy(() -> c.assertAllowed("stranger@example.com"))
+        assertThatThrownBy(() -> c.mintSession("chat", List.of()))
                 .isInstanceOf(BusinessException.class);
-        assertThatThrownBy(() -> c.assertAllowed(null)).isInstanceOf(BusinessException.class);
     }
 
     @Test

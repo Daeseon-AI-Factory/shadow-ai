@@ -2,6 +2,7 @@ package com.tubeshadow.library.api;
 
 import com.tubeshadow.auth.security.AuthenticatedUser;
 import com.tubeshadow.auth.security.CurrentUser;
+import com.tubeshadow.billing.application.AccessPolicy;
 import com.tubeshadow.common.web.ApiResponse;
 import com.tubeshadow.library.api.dto.LibraryVideoPageResponse;
 import com.tubeshadow.library.application.LibraryVideoService;
@@ -28,9 +29,11 @@ import java.util.UUID;
 public class LibraryVideoController {
 
     private final LibraryVideoService libraryService;
+    private final AccessPolicy accessPolicy;
 
-    public LibraryVideoController(LibraryVideoService libraryService) {
+    public LibraryVideoController(LibraryVideoService libraryService, AccessPolicy accessPolicy) {
         this.libraryService = libraryService;
+        this.accessPolicy = accessPolicy;
     }
 
     public record SaveVideoRequest(UUID videoId) {
@@ -40,6 +43,7 @@ public class LibraryVideoController {
     @Operation(summary = "영상을 내 라이브러리에 저장 (멱등)")
     public ResponseEntity<ApiResponse<Void>> save(@RequestBody SaveVideoRequest request,
                                                   @CurrentUser AuthenticatedUser user) {
+        accessPolicy.requireShadow(user.id());
         libraryService.save(user.id(), request.videoId());
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(null));
     }

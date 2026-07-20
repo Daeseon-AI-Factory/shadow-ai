@@ -141,6 +141,7 @@ class PracticeControllerTest extends SpringIntegrationTest {
         mockMvc.perform(post("/api/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isCreated());
+        grantPaidCapabilities(email);
         String loginBody = objectMapper.writeValueAsString(Map.of("email", email, "password", "passpass1"));
         String resp = mockMvc.perform(post("/api/auth/login")
                         .contentType(MediaType.APPLICATION_JSON).content(loginBody))

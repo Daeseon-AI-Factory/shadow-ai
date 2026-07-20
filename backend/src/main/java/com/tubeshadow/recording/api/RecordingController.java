@@ -2,6 +2,7 @@ package com.tubeshadow.recording.api;
 
 import com.tubeshadow.auth.security.AuthenticatedUser;
 import com.tubeshadow.auth.security.CurrentUser;
+import com.tubeshadow.billing.application.AccessPolicy;
 import com.tubeshadow.common.web.ApiResponse;
 import com.tubeshadow.recording.api.dto.RecordingResponse;
 import com.tubeshadow.recording.application.RecordingService;
@@ -32,9 +33,11 @@ import java.util.UUID;
 public class RecordingController {
 
     private final RecordingService recordingService;
+    private final AccessPolicy accessPolicy;
 
-    public RecordingController(RecordingService recordingService) {
+    public RecordingController(RecordingService recordingService, AccessPolicy accessPolicy) {
         this.recordingService = recordingService;
+        this.accessPolicy = accessPolicy;
     }
 
     @PostMapping(value = "/api/clips/{clipId}/recordings", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -44,6 +47,7 @@ public class RecordingController {
             @RequestParam("file") MultipartFile file,
             @RequestParam("durationMs") long durationMs,
             @CurrentUser AuthenticatedUser user) {
+        accessPolicy.requireShadow(user.id());
         Recording saved = recordingService.upload(user.id(), clipId, file, durationMs);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.ok(RecordingResponse.from(saved)));

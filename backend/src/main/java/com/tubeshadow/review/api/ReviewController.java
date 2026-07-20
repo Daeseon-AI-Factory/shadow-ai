@@ -2,6 +2,7 @@ package com.tubeshadow.review.api;
 
 import com.tubeshadow.auth.security.AuthenticatedUser;
 import com.tubeshadow.auth.security.CurrentUser;
+import com.tubeshadow.billing.application.AccessPolicy;
 import com.tubeshadow.common.web.ApiResponse;
 import com.tubeshadow.review.api.dto.ReviewQueueItem;
 import com.tubeshadow.review.api.dto.ReviewRespondRequest;
@@ -33,9 +34,11 @@ import java.util.UUID;
 public class ReviewController {
 
     private final ReviewService reviewService;
+    private final AccessPolicy accessPolicy;
 
-    public ReviewController(ReviewService reviewService) {
+    public ReviewController(ReviewService reviewService, AccessPolicy accessPolicy) {
         this.reviewService = reviewService;
+        this.accessPolicy = accessPolicy;
     }
 
     @GetMapping("/queue")
@@ -53,6 +56,7 @@ public class ReviewController {
     public ApiResponse<ReviewRespondResponse> respond(@PathVariable UUID id,
                                                        @Valid @RequestBody ReviewRespondRequest request,
                                                        @CurrentUser AuthenticatedUser user) {
+        accessPolicy.requireShadow(user.id());
         ReviewItem updated = reviewService.respond(user.id(), id, request.quality());
         return ApiResponse.ok(ReviewRespondResponse.from(updated));
     }

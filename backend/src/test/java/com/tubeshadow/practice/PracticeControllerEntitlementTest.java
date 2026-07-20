@@ -1,6 +1,7 @@
 package com.tubeshadow.practice;
 
 import com.tubeshadow.auth.security.AuthenticatedUser;
+import com.tubeshadow.billing.application.AccessPolicy;
 import com.tubeshadow.practice.api.PracticeController;
 import com.tubeshadow.practice.api.dto.ComposeCheckRequest;
 import com.tubeshadow.practice.api.dto.ComposeFeedback;
@@ -28,15 +29,19 @@ class PracticeControllerEntitlementTest {
     private final CompositionService composition = mock(CompositionService.class);
     private final SparringClient sparring = mock(SparringClient.class);
     private final AiGate gate = mock(AiGate.class);
+    private final AccessPolicy accessPolicy = mock(AccessPolicy.class);
+    private final PracticeProgressService progressService = mock(PracticeProgressService.class);
+    private final PracticeSrsService srsService = mock(PracticeSrsService.class);
     private final PracticeController controller = new PracticeController(
-            mock(PracticeProgressService.class),
-            mock(PracticeSrsService.class),
+            progressService,
+            srsService,
             composition,
             mock(TransformService.class),
             mock(SeedService.class),
             mock(TranscriptionClient.class),
             sparring,
-            gate);
+            gate,
+            accessPolicy);
     private final AuthenticatedUser user = new AuthenticatedUser(
             UUID.fromString("12345678-1234-1234-1234-123456789abc"), "stale-token@example.com", 0);
 
@@ -62,5 +67,24 @@ class PracticeControllerEntitlementTest {
 
         assertThat(response.clientSecret()).isEqualTo("ephemeral");
         verify(gate).assertEntitled(user.id());
+    }
+
+    @Test
+    void practiceProgressionWritesUseTheShadowGate() {
+        controller.rep(user, null);
+
+        verify(accessPolicy).requireShadow(user.id());
+        verify(progressService).recordRep(org.mockito.ArgumentMatchers.eq(user.id()),
+                org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void srsGradingUsesTheShadowGate() {
+        controller.grade(user, new com.tubeshadow.practice.api.dto.GradeRequest(
+                "pat:on-depend-on#0", true, java.time.LocalDate.parse("2026-01-10")));
+
+        verify(accessPolicy).requireShadow(user.id());
+        verify(srsService).grade(user.id(), "pat:on-depend-on#0", true,
+                java.time.LocalDate.parse("2026-01-10"));
     }
 }

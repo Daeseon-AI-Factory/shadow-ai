@@ -56,6 +56,9 @@ class AccountDeletionTest extends SpringIntegrationTest {
                 UUID.randomUUID(), userId);
         jdbc.update("INSERT INTO practice_card (id, user_id, card_key, due_date, created_at) "
                 + "VALUES (?, ?, 'pat:x#0', current_date, now())", UUID.randomUUID(), userId);
+        jdbc.update("INSERT INTO user_entitlements (user_id, capability, source, environment, status, "
+                + "last_verified_at, created_at) "
+                + "VALUES (?, 'SHADOW_ACCESS', 'MIGRATION', 'PRODUCTION', 'ACTIVE', now(), now())", userId);
 
         mockMvc.perform(delete("/api/auth/me")
                         .header("Authorization", "Bearer " + token)
@@ -65,7 +68,7 @@ class AccountDeletionTest extends SpringIntegrationTest {
 
         assertThat(countFor("users", "id", userId)).isZero();
         for (String table : new String[]{"clips", "recordings", "review_items", "decks",
-                "practice_progress", "practice_card"}) {
+                "practice_progress", "practice_card", "user_entitlements"}) {
             assertThat(countFor(table, "user_id", userId)).as("rows left in %s", table).isZero();
         }
         // Shared video is keyed globally (youtube_id) and must survive a user deletion.
